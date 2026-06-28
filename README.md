@@ -35,7 +35,7 @@ The HUD helps you keep an eye on quota so you can switch models before you hit t
 - **🧰 Tool tallies** - see what the agent has been doing: `✔ read ×5 │ ✔ edit ×2 │ ✔ bash ×3`
 - **📐 Adaptive layouts** - automatically adjusts for wide, medium, and narrow terminals
 - **🪟 Cross-platform** - Windows, macOS, Linux. One `npm install` and you're done.
-- **🎨 Beautiful ANSI output** - bold, colour, Unicode glyphs. Degrades gracefully with `AGY_HUD_NO_COLOR` and `AGY_HUD_NO_UNICODE`.
+- **🎨 Addictive, eyecandy Terminal output** - bold, colour, Unicode glyphs. Degrades gracefully with `AGY_HUD_NO_COLOR` and `AGY_HUD_NO_UNICODE`.
 - **📜 Transcript parsing** - reads Antigravity's JSONL transcripts to count tool usage per category
 - **🔌 Zero dependencies** - pure Node.js built-ins, no npm packages needed at runtime
 

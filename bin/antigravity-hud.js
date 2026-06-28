@@ -80,7 +80,11 @@ function quotaColor(pct) {
 /** Get remaining quota percentage, defaulting to 100 if missing or null. */
 function quotaPct(q) {
   if (!q || q.remaining_fraction == null) return 100;
-  return Math.round(q.remaining_fraction * 100);
+
+  const pct = Math.round(Number(q.remaining_fraction) * 100);
+  if (!Number.isFinite(pct)) return 100;
+
+  return Math.max(0, Math.min(100, pct));
 }
 
 /** Safely get a nested property. */
