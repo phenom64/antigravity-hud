@@ -129,6 +129,43 @@ If you prefer to configure manually, edit `~/.gemini/antigravity-cli/settings.js
 Legacy manual installation scripts are also available under `scripts/install.ps1` and `scripts/install.sh`.
 
 
+## Commands
+
+The CLI provides commands to query and modify your tool permission settings in `settings.json`.
+
+### Tool Permission Mode
+
+The HUD displays your active tool permission mode in the bottom-left corner (for example, `⏩ auto mode auto`). You can query or change this mode using the `mode` subcommand.
+
+* **Show current mode:**
+  ```bash
+  antigravity-hud mode
+  ```
+  Prints the active settings file key (usually `toolPermission`), the raw configuration value, and the corresponding HUD label.
+
+* **Cycle permission modes:**
+  ```bash
+  antigravity-hud mode next
+  ```
+  Cycles through the four permission modes: `review` -> `auto` -> `yolo` -> `strict`.
+
+* **Set specific mode:**
+  ```bash
+  antigravity-hud mode <mode>
+  ```
+  Sets the tool permission mode. Valid modes are:
+  - `review` (maps to `"request-review"`): Asks for permission before executing tools.
+  - `auto` (maps to `"proceed-in-sandbox"`): Automatically executes sandboxed/safe tools and prompts for others.
+  - `yolo` (maps to `"always-proceed"`): Automatically executes all tools without prompting.
+  - `strict` (maps to `"strict"`): Enforces strict permission prompts.
+
+### Keybinding Limitation
+
+Antigravity TUI keybindings only support internal actions. They cannot run external commands. Because of this limitation, you cannot bind Shift+Tab to execute `antigravity-hud mode next` from inside the TUI.
+
+To cycle permission modes, run `antigravity-hud mode next` from a separate terminal window, tmux pane, or shell alias.
+
+
 ## How it works
 
 Antigravity pipes a JSON payload to your statusline command via stdin on every render tick. The payload includes:
