@@ -40,12 +40,14 @@ const ENABLE_LINKS = process.env.AGY_HUD_LINKS   === '1';
 let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
 let FAST = '\u23E9', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
 let FULL = '\u2588', EMPTY = '\u2591';
+let PAUSE = '\u23F8', LOCK = '\uD83D\uDD12';
 let SPINNER_FRAMES = ['\u280B','\u2819','\u2839','\u2838','\u283C','\u2834','\u2826','\u2827','\u2807','\u280F'];
 
 if (NO_UNICODE) {
   SEP = '|'; DOT = '*'; UP = '^'; DOWN = 'v';
   FAST = '>>'; WARN = '!'; CHECK = '+'; TIMES = 'x';
   FULL = '#'; EMPTY = '.';
+  PAUSE = '||'; LOCK = '[lock]';
   SPINNER_FRAMES = ['|','/','-','\\'];
 }
 
@@ -211,6 +213,10 @@ const colorQuotaMid  = resolveColor(config.colors.quotaMid, `${Yellow}`);
 const colorQuotaLow  = resolveColor(config.colors.quotaLow, `${Orange}`);
 const colorQuotaCritical = resolveColor(config.colors.quotaCritical, `${Red}`);
 const colorAuto      = resolveColor(config.colors.auto, `${Orange}`);
+const colorPermReview = resolveColor(config.colors.permissionReview, '#FFD166');
+const colorPermAuto   = resolveColor(config.colors.permissionAuto,   `${Orange}`);
+const colorPermBypass = resolveColor(config.colors.permissionBypass, '#FF3B8A');
+const colorPermStrict = resolveColor(config.colors.permissionStrict, '#8EA2FF');
 
 function getRamUsage() {
   try {
@@ -1144,9 +1150,6 @@ function runHud(raw) {
   }
 
   // ─── LINE 4: auto mode │ shell │ tasks │ agents ───────────────────────────────
-  const mode = j.auto_mode || j.planning_mode || j.automation_mode
-    || j.approval_mode || j.mode || '--';
-
   let shellText = `${shellCount} shell`;
   if (ENABLE_LINKS && resolvedTPath) {
     let tUrl = resolvedTPath.replace(/\\/g, '/');
@@ -1156,7 +1159,40 @@ function runHud(raw) {
     shellText = `\u001b]8;;file://${tUrl}\u0007${shellCount} shell\u001b]8;;\u0007`;
   }
 
-  let line4 = `${colorAuto}${FAST} auto mode ${mode}${R}`
+  const permMode = (() => {
+    const settings = readSettings();
+    const key = getExistingPermissionKey(settings) || 'toolPermission';
+    return settings[key] || 'request-review';
+  })();
+
+  let permColor = colorPermReview;
+  let permIcon = PAUSE;
+  let permText = 'review';
+
+  if (permMode === 'request-review') {
+    permColor = colorPermReview;
+    permIcon = PAUSE;
+    permText = (layout === 'tiny') ? 'review' : 'review';
+  } else if (permMode === 'proceed-in-sandbox') {
+    permColor = colorPermAuto;
+    permIcon = FAST;
+    permText = (layout === 'tiny') ? 'auto' : (layout === 'compact') ? 'auto' : 'auto mode';
+  } else if (permMode === 'always-proceed') {
+    permColor = colorPermBypass;
+    permIcon = FAST;
+    permText = (layout === 'tiny' || layout === 'compact') ? 'YOLO' : 'bypass permissions (YOLO)';
+  } else if (permMode === 'strict') {
+    permColor = colorPermStrict;
+    permIcon = LOCK;
+    permText = (layout === 'tiny') ? 'strict' : 'strict';
+  }
+
+  // Determine prefix: in tiny layout, we don't display icons or leading spaces
+  const permSection = (layout === 'tiny') 
+    ? `${permColor}${permText}${R}`
+    : `${permColor}${permIcon} ${permText}${R}`;
+
+  let line4 = `${permSection}`
     + ` ${colorSuccess}${DOT}${R} ${White}${shellText}${R}`;
 
   if (taskCount > 0) {
