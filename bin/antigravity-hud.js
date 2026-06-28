@@ -474,6 +474,83 @@ if (arg === 'install') {
   runConfigure();
 } else if (arg === '--help' || arg === '-h') {
   runHelp();
+} else if (arg === 'mode') {
+  const sub = process.argv[3];
+  const settings = readSettings();
+  const key = getExistingPermissionKey(settings) || 'toolPermission';
+  const val = settings[key] || 'request-review';
+
+  const map = {
+    review: 'request-review',
+    auto: 'proceed-in-sandbox',
+    yolo: 'always-proceed',
+    strict: 'strict'
+  };
+
+  const getHUDLabel = (modeVal) => {
+    if (modeVal === 'request-review') return 'review';
+    if (modeVal === 'proceed-in-sandbox') return 'auto mode';
+    if (modeVal === 'always-proceed') return 'bypass permissions (YOLO)';
+    if (modeVal === 'strict') return 'strict';
+    return modeVal;
+  };
+
+  if (!sub) {
+    console.log(`\n  ${B}${Cyan}antigravity-hud mode${R}`);
+    console.log(`  ${Gray}====================${R}\n`);
+    console.log(`  ${White}Active Key:${R} ${key}`);
+    console.log(`  ${White}Raw Value:${R} ${val}`);
+    console.log(`  ${White}HUD Label:${R} ${getHUDLabel(val)}`);
+    process.exit(0);
+  } else if (sub === 'next') {
+    const cycle = ['request-review', 'proceed-in-sandbox', 'always-proceed', 'strict'];
+    const curIdx = cycle.indexOf(val);
+    const nextVal = cycle[(curIdx + 1) % cycle.length];
+    
+    try {
+      backupSettings();
+      settings[key] = nextVal;
+      writeSettings(settings);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to cycle mode: ${err.message}${R}`);
+      process.exit(1);
+    }
+    console.log(`  ${Green}[OK] Cycled permission mode from '${val}' to '${nextVal}'.${R}`);
+    process.exit(0);
+  } else if (['review', 'auto', 'yolo', 'strict'].includes(sub)) {
+    const targetVal = map[sub];
+    if (val === targetVal) {
+      console.log(`  [OK] Permission mode is already set to '${targetVal}'.`);
+      process.exit(0);
+    }
+    try {
+      backupSettings();
+      settings[key] = targetVal;
+      writeSettings(settings);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to set mode: ${err.message}${R}`);
+      process.exit(1);
+    }
+    console.log(`  ${Green}[OK] Changed permission mode from '${val}' to '${targetVal}'.${R}`);
+    process.exit(0);
+  } else {
+    console.error(`  ${Red}[!] Unknown mode command: ${sub}${R}`);
+    console.log(`  Valid mode commands:`);
+    console.log(`    antigravity-hud mode`);
+    console.log(`    antigravity-hud mode next`);
+    console.log(`    antigravity-hud mode review`);
+    console.log(`    antigravity-hud mode auto`);
+    console.log(`    antigravity-hud mode yolo`);
+    console.log(`    antigravity-hud mode strict`);
+    process.exit(1);
+  }
+} else if (arg === 'bind-shift-tab') {
+  console.log(`\n  ${Yellow}[!] Shift+Tab is not supported by Antigravity yet.${R}`);
+  console.log(`  Antigravity's keybindings only support mapping key combinations to internal TUI commands.`);
+  console.log(`  They cannot trigger external shell commands or slash commands.`);
+  console.log(`  Please cycle your permission modes using:`);
+  console.log(`    ${Cyan}antigravity-hud mode next${R}\n`);
+  process.exit(0);
 } else {
   // Read stdin and render HUD (the default behavior)
   let raw = '';
@@ -787,6 +864,10 @@ function runHelp() {
     ${White}antigravity-hud configure${R} Open the interactive configuration wizard
     ${White}antigravity-hud doctor${R}    Check install status and run a sample render test
     ${White}antigravity-hud uninstall${R} Remove or disable the HUD configuration
+    ${White}antigravity-hud mode${R}        Show current Antigravity tool permission mode
+    ${White}antigravity-hud mode next${R}   Cycle permission modes
+    ${White}antigravity-hud mode <mode>${R}  Set mode to review, auto, yolo, or strict
+    ${White}antigravity-hud bind-shift-tab${R} Bind Shift+Tab keyboard shortcut
 
   Options:
     -h, --help                Show this help screen
