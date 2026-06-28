@@ -1,13 +1,10 @@
 # 🚀 antigravity-hud
 
+[![License](https://img.shields.io/github/license/phenom64/antigravity-hud)](LICENSE)
+
 > A 4-line statusline HUD for the [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli). Because flying blind through your quota is no way to code.
 
-```
-Claude Opus 4.6 (Thinking) │ my-app git:(main*) │ ⠹ tool_use
-ctx ████████░░░░ 21% (48.2k ↑ / 3.9k ↓ / 250.0k) │ 5h ███████░░░░░ 72% 3h0m │ wk ███████████░ 91% 6d12h
-✔ read ×3 │ ✔ search ×1 │ ✔ edit ×2 │ ✔ bash ×2 │
-⏩ auto mode auto │ ● 2 shell │ ● 0 agents
-```
+![Antigravity HUD Preview](img/antigravity-hud.png)
 
 ## The backstory
 
