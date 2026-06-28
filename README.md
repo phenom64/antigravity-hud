@@ -11,7 +11,7 @@
 Whilst building SynCloudOS I burned through my entire [Claude Code](https://claude.ai) and [ChatGPT Codex](https://chat.openai.com) weekly usage limits in about 48 hours. Classic. Then I rediscovered **Google Antigravity**, Google's agentic coding CLI that ships with Gemini models *and* lets you use third-party models like Claude Opus/Sonnet 4.6 through the same interface. More importantly I realised I have been paying for this and really should use it at least once.
 
 The problem? Antigravity's built-in statusline is... minimal. I wanted something that showed me *everything* at a glance: which model I'm burning tokens on, how much quota I have left, what tools the agent is using, and whether I should maybe switch to Gemini 3.5 Flash for that docs task instead of torching premium Claude tokens.
-I also wanted a *gamified* interface, one that is addictive, almost slot (slop?) machine like and encourages me to waste my 20s vibe coding, à la Claude.
+I also wanted a *gamified* interface, one that is addictive, almost slot-machine-like, or maybe slop-machine-like, which is honestly the point, and encourages me to waste my 20s vibe coding, à la Claude.
 
 So I built this. First as a [chaotic PowerShell script](legacy/statusline-syn.ps1), then as a proper cross-platform Node.js CLI.
 
@@ -27,12 +27,12 @@ The HUD helps you keep an eye on quota so you can switch models before you hit t
 
 ## Features
 
-- **📊 Quota health bars** - 5-hour and weekly quota with colour-coded bars (green, amber, orange, red, ⚠ limit reached)
+- **📊 Quota health bars** - 5-hour and weekly quota with colour-coded bars (quotaHigh, quotaMid, quotaLow, quotaCritical)
 - **🔄 Live spinner** - braille-dot animation when the agent is thinking/working/tooling
 - **🧰 Tool tallies** - see what the agent has been doing: `✔ read ×5 │ ✔ edit ×2 │ ✔ bash ×3`
 - **📐 Adaptive layouts** - automatically adjusts for wide, medium, and narrow terminals
 - **🪟 Cross-platform** - Windows, macOS, Linux. One `npm install` and you're done.
-- **🎨 Addictive, eyecandy Terminal output** - bold, colour, Unicode glyphs. Degrades gracefully with `AGY_HUD_NO_COLOR` and `AGY_HUD_NO_UNICODE`.
+- **🎨 Addictive, eye-candy terminal output** - bold, colour, Unicode glyphs. Degrades gracefully with `AGY_HUD_NO_COLOR` and `AGY_HUD_NO_UNICODE`.
 - **📜 Transcript parsing** - reads Antigravity's JSONL transcripts to count tool usage per category
 - **🔌 Zero dependencies** - pure Node.js built-ins, no npm packages needed at runtime
 
@@ -169,12 +169,13 @@ export AGY_HUD_LAYOUT=compact
 | `AGY_HUD_NO_SPINNER` | `1` | Disable spinner animation (always show ●) |
 | `AGY_HUD_TOOL_MAX` | `1`-`10` | Max number of tool categories to display |
 | `AGY_HUD_TRANSCRIPT` | path | Point at a specific transcript JSONL (useful for testing) |
+| `AGY_HUD_LINKS` | `1` | Enable experimental OSC 8 terminal hyperlinks for project paths and shell logs |
 
 ## Output lines explained
 
 ```
 Line 1:  Model │ repo git:(branch*) │ ● state
-Line 2:  ctx [████░░░░] 21% (48k ↑ / 4k ↓ / 250k) │ 5h [████░░] 72% 3h │ wk [█████░] 91% 6d
+Line 2:  ctx [████░░░░] 21% (48k ↑ / 4k ↓ / 250k) │ 5h [████░░] 72% 3h │ wk [█████░] 91% 6d │ ~$0.041 │ RAM 54%
 Line 3:  ✔ read ×5 │ ✔ search ×1 │ ✔ edit ×2 │ ✔ bash ×3 │
 Line 4:  ⏩ auto mode auto │ ● 3 shell │ ● 1 tasks │ ● 0 agents
 ```
@@ -187,6 +188,7 @@ Line 4:  ⏩ auto mode auto │ ● 3 shell │ ● 1 tasks │ ● 0 agents
 | State + spinner | `agent_state`, spinner animates during active states |
 | Context bar | `context_window.used_percentage` with token counts |
 | 5h / wk quota | `quota.3p-5h` or `quota.gemini-5h` depending on model |
+| Cost estimation | `~$0.041` approximate API-equivalent cost (not exact Antigravity billing) |
 | Tool tallies | Parsed from conversation transcript JSONL |
 | Shell / tasks / agents | Counted from `run_command`, `manage_task`/`schedule`, subagent calls |
 

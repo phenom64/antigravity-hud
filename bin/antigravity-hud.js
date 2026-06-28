@@ -34,6 +34,7 @@ try {
 const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1' || config.colorMode === false;
 const NO_UNICODE = process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false;
 const NO_SPINNER = process.env.AGY_HUD_NO_SPINNER === '1';
+const ENABLE_LINKS = process.env.AGY_HUD_LINKS   === '1';
 
 // ─── UNICODE / ASCII GLYPHS ───────────────────────────────────────────────────
 let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
@@ -90,10 +91,10 @@ function fmtReset(seconds) {
 
 /** Pick ANSI color for a remaining-percentage value. */
 function quotaColor(pct) {
-  if (pct >= 50) return Green;
-  if (pct >= 25) return Amber;
-  if (pct >= 15) return Orange;
-  return Red;
+  if (pct >= 50) return colorQuotaHigh;
+  if (pct >= 25) return colorQuotaMid;
+  if (pct >= 15) return colorQuotaLow;
+  return colorQuotaCritical;
 }
 
 /** Get remaining quota percentage, defaulting to 100 if missing or null. */
@@ -122,22 +123,37 @@ const ANSI_BY_NAME = {
 
 function resolveColor(value, fallback) {
   if (NO_COLOR) return '';
-  if (!value) return fallback;
-  if (typeof value === 'number') {
-    return `\x1b[38;5;${value}m`;
+  const val = value || fallback;
+  if (!val) return '';
+  if (typeof val === 'number') {
+    return `\x1b[38;5;${val}m`;
   }
-  if (typeof value === 'string') {
-    if (value.startsWith('#') && value.length === 7) {
-      const r = parseInt(value.slice(1, 3), 16);
-      const g = parseInt(value.slice(3, 5), 16);
-      const b = parseInt(value.slice(5, 7), 16);
+  if (typeof val === 'string') {
+    if (val.startsWith('#') && val.length === 7) {
+      const r = parseInt(val.slice(1, 3), 16);
+      const g = parseInt(val.slice(3, 5), 16);
+      const b = parseInt(val.slice(5, 7), 16);
       return `\x1b[38;2;${r};${g};${b}m`;
     }
-    const nameColor = ANSI_BY_NAME[value.toLowerCase()];
+    const nameColor = ANSI_BY_NAME[val.toLowerCase()];
     if (nameColor) return nameColor;
   }
   return fallback;
 }
+
+// ─── RESOLVED COLOURS ──────────────────────────────────────────────────────────
+const colorModel   = resolveColor(config.colors.model, `${Cyan}`);
+const colorRepo    = resolveColor(config.colors.project, `${Yellow}`);
+const colorGit     = resolveColor(config.colors.git, '#9D7AFF');
+const colorLabel   = resolveColor(config.colors.label, `${Gray}`);
+const colorSep     = resolveColor(config.colors.separator, `${Yellow}`);
+const colorActive  = resolveColor(config.colors.active, `${Cyan}`);
+const colorSuccess = resolveColor(config.colors.success, `${Green}`);
+const colorQuotaHigh = resolveColor(config.colors.quotaHigh, '#8EA2FF');
+const colorQuotaMid  = resolveColor(config.colors.quotaMid, `${Yellow}`);
+const colorQuotaLow  = resolveColor(config.colors.quotaLow, `${Orange}`);
+const colorQuotaCritical = resolveColor(config.colors.quotaCritical, `${Red}`);
+const colorAuto      = resolveColor(config.colors.auto, `${Orange}`);
 
 function getRamUsage() {
   try {
@@ -152,32 +168,35 @@ function getRamUsage() {
   }
 }
 
-function estimateCost(modelName, inTokens, outTokens) {
-  let inPrice = 3.0; // fallback pricing ($/M tokens)
-  let outPrice = 15.0;
+/**
+ * Model pricing rates in USD per million tokens.
+ * NOTE: This is an API-equivalent estimate only and may be stale.
+ * These are conservative rates for cost approximation, not exact Antigravity billing.
+ */
+const MODEL_PRICING = {
+  'opus': { input: 15.0, output: 75.0 },
+  'sonnet': { input: 3.0, output: 15.0 },
+  'haiku': { input: 0.8, output: 4.0 },
+  'gemini-1.5-pro': { input: 1.25, output: 5.0 },
+  'gemini-1.5-flash': { input: 0.075, output: 0.3 },
+  'gemini-2.0-flash': { input: 0.075, output: 0.3 },
+  'gemini-3.5-flash': { input: 0.075, output: 0.3 },
+  'default': { input: 3.0, output: 15.0 } // conservative fallback
+};
 
+function estimateCost(modelName, inTokens, outTokens) {
   const modelLower = modelName.toLowerCase();
-  if (modelLower.includes('opus')) {
-    inPrice = 15.0;
-    outPrice = 75.0;
-  } else if (modelLower.includes('sonnet')) {
-    inPrice = 3.0;
-    outPrice = 15.0;
-  } else if (modelLower.includes('haiku')) {
-    inPrice = 0.8;
-    outPrice = 4.0;
-  } else if (modelLower.includes('gemini-1.5-pro') || modelLower.includes('gemini 1.5 pro')) {
-    inPrice = 1.25;
-    outPrice = 5.0;
-  } else if (modelLower.includes('gemini-1.5-flash') || modelLower.includes('gemini 1.5 flash') ||
-             modelLower.includes('gemini-2.0-flash') || modelLower.includes('gemini 2.0 flash') ||
-             modelLower.includes('gemini-3.5-flash') || modelLower.includes('gemini 3.5 flash')) {
-    inPrice = 0.075;
-    outPrice = 0.3;
+  let pricing = MODEL_PRICING['default'];
+
+  for (const [key, val] of Object.entries(MODEL_PRICING)) {
+    if (key !== 'default' && modelLower.includes(key)) {
+      pricing = val;
+      break;
+    }
   }
 
-  const inputUsd = (inTokens / 1000000) * inPrice;
-  const outputUsd = (outTokens / 1000000) * outPrice;
+  const inputUsd = (inTokens / 1000000) * pricing.input;
+  const outputUsd = (outTokens / 1000000) * pricing.output;
   return inputUsd + outputUsd;
 }
 
@@ -256,17 +275,56 @@ function findFiles(dir, target) {
   return results;
 }
 
+function saveTranscriptCache(statePath, tPath) {
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({
+      transcriptPath: tPath,
+      transcriptMtime: Date.now()
+    }, null, 2), 'utf8');
+  } catch (_) {}
+}
+
 /** Locate the best transcript.jsonl to parse. */
 function resolveTranscript(j) {
   // 0. AGY_HUD_TRANSCRIPT env override (handy for local testing)
   if (process.env.AGY_HUD_TRANSCRIPT) {
     try { if (fs.existsSync(process.env.AGY_HUD_TRANSCRIPT)) return process.env.AGY_HUD_TRANSCRIPT; } catch (_) {}
   }
-  // 1. Explicit path from payload
-  if (j && j.transcript_path) {
-    try { if (fs.existsSync(j.transcript_path)) return j.transcript_path; } catch (_) {}
+
+  const statePath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-state.json');
+  let cachedPath = null;
+
+  // 1. Try reading state cache
+  try {
+    if (fs.existsSync(statePath)) {
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      cachedPath = state.transcriptPath;
+    }
+  } catch (_) {}
+
+  // Check if cache is still valid
+  if (cachedPath) {
+    try {
+      if (fs.existsSync(cachedPath)) {
+        return cachedPath;
+      }
+    } catch (_) {
+      cachedPath = null;
+    }
   }
-  // 2. Search common brain directories for newest transcript.jsonl
+
+  // 2. Explicit path from payload
+  if (j && j.transcript_path) {
+    try {
+      if (fs.existsSync(j.transcript_path)) {
+        saveTranscriptCache(statePath, j.transcript_path);
+        return j.transcript_path;
+      }
+    } catch (_) {}
+  }
+
+  // 3. Search common brain directories for newest transcript.jsonl
   const home = os.homedir();
   const searchDirs = [
     path.join(home, '.gemini', 'antigravity-cli', 'brain'),
@@ -278,21 +336,73 @@ function resolveTranscript(j) {
   }
   if (all.length === 0) return null;
   all.sort((a, b) => b.mtime - a.mtime);
-  return all[0].path;
+  const foundPath = all[0].path;
+
+  saveTranscriptCache(statePath, foundPath);
+  return foundPath;
 }
 
-// Tool category mapping
-const TOOL_CATEGORIES = {
-  list_permissions: 'read', list_dir: 'read', view_file: 'read',
-  grep_search: 'search', search_web: 'search', read_url_content: 'search',
-  write_to_file: 'write',
-  replace_file_content: 'edit', multi_replace_file_content: 'edit',
-  run_command: 'bash',
-  define_subagent: 'agent', invoke_subagent: 'agent', manage_subagents: 'agent', send_message: 'agent',
-  manage_task: 'task', schedule: 'task',
-  ask_question: 'ask', ask_permission: 'ask',
-  generate_image: 'image',
-};
+/** Read only the last maxBytes of a file. */
+function readLastBytes(filePath, maxBytes) {
+  let fd;
+  try {
+    const stats = fs.statSync(filePath);
+    const size = stats.size;
+    if (size === 0) return '';
+
+    fd = fs.openSync(filePath, 'r');
+    const bytesToRead = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    const position = size - bytesToRead;
+
+    fs.readSync(fd, buffer, 0, bytesToRead, position);
+    return buffer.toString('utf8');
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
+/** Map tool calls to structured categories. */
+function categoriseTool(toolName) {
+  if (!toolName) return 'tool';
+  if (toolName.startsWith('mcp__')) return 'mcp';
+
+  const name = toolName.toLowerCase();
+  
+  if (name.includes('browser') || name.includes('chrome') || name.includes('computer')) {
+    return 'browser';
+  }
+  if (name.includes('read') || name.includes('view') || name.includes('list')) {
+    return 'read';
+  }
+  if (name.includes('grep') || name.includes('search')) {
+    return 'search';
+  }
+  if (name.includes('write') || name.includes('create')) {
+    return 'write';
+  }
+  if (name.includes('edit') || name.includes('replace') || name.includes('patch')) {
+    return 'edit';
+  }
+  if (name.includes('command') || name.includes('shell') || name.includes('bash') || name === 'run_command') {
+    return 'bash';
+  }
+  if (['define_subagent', 'invoke_subagent', 'manage_subagents', 'send_message'].includes(name)) {
+    return 'agent';
+  }
+  if (['manage_task', 'schedule'].includes(name)) {
+    return 'task';
+  }
+  if (['ask_question', 'ask_permission'].includes(name)) {
+    return 'ask';
+  }
+  if (name === 'generate_image') {
+    return 'image';
+  }
+  return 'tool';
+}
 
 // ─── SUBCOMMAND ROUTING ────────────────────────────────────────────────────────
 const arg = process.argv[2];
@@ -644,15 +754,6 @@ function runHud(raw) {
   const ctxSize  = dig(j, 'context_window', 'context_window_size') || 1;
   const ctxPct   = dig(j, 'context_window', 'used_percentage')     || 0;
 
-  // ─── RESOLVE COLORS ────────────────────────────────────────────────────────────
-  const colorModel   = resolveColor(config.colors.model, `${Cyan}`);
-  const colorRepo    = resolveColor(config.colors.project, `${Yellow}`);
-  const colorGit     = resolveColor(config.colors.git, `${Blue}`);
-  const colorLabel   = resolveColor(config.colors.label, `${Gray}`);
-  const colorSep     = resolveColor(config.colors.separator, `${Yellow}`);
-  const colorActive  = resolveColor(config.colors.active, `${Cyan}`);
-  const colorSuccess = resolveColor(config.colors.success, `${Green}`);
-
   // ─── CALCULATE COST, SPEED, RAM ────────────────────────────────────────────────
   const totalCost   = estimateCost(model, ctxIn, ctxOut);
   const cachePath   = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'speed-cache.json');
@@ -726,15 +827,19 @@ function runHud(raw) {
   let agentInvoked = 0;
   let activeAgents = null;
   let seqNum       = 0;
+  let resolvedTPath = null;
 
   try {
     const tPath = resolveTranscript(j);
     if (tPath) {
-      const content = fs.readFileSync(tPath, 'utf8');
+      resolvedTPath = tPath;
+      const content = readLastBytes(tPath, 262144);
       const lines   = content.split('\n');
-      const slice   = lines.slice(Math.max(0, lines.length - 320));
+      if (lines.length > 1 && content.length >= 262144) {
+        lines.shift();
+      }
 
-      for (const line of slice) {
+      for (const line of lines) {
         if (!line.trim()) continue;
         let entry;
         try { entry = JSON.parse(line); } catch (_) { continue; }
@@ -748,16 +853,16 @@ function runHud(raw) {
         if (Array.isArray(entry.tool_calls)) {
           for (const tc of entry.tool_calls) {
             const toolName = tc.name || tc.tool_name || tc.function?.name || '';
-            const cat = TOOL_CATEGORIES[toolName];
-            if (!cat) continue;
+            const cat = categoriseTool(toolName);
 
             toolCounts[cat]   = (toolCounts[cat] || 0) + 1;
             toolLastSeen[cat] = seqNum;
 
-            if (toolName === 'run_command') shellCount++;
-            if (toolName === 'manage_task' || toolName === 'schedule') taskCount++;
+            const name = toolName.toLowerCase();
+            if (name === 'run_command') shellCount++;
+            if (name === 'manage_task' || name === 'schedule') taskCount++;
 
-            if (toolName === 'invoke_subagent') {
+            if (name === 'invoke_subagent') {
               const args = tc.arguments || tc.args || {};
               const subs = args.Subagents || args.subagents;
               agentInvoked += Array.isArray(subs) ? subs.length : 1;
@@ -803,17 +908,26 @@ function runHud(raw) {
         : ` ${colorLabel}git:(${colorGit}${branch}${dirty}${colorLabel})${R}`)
     : '';
 
+  let repoText = repo;
+  if (ENABLE_LINKS && project) {
+    let projectUrl = project.replace(/\\/g, '/');
+    if (!projectUrl.startsWith('/')) {
+      projectUrl = '/' + projectUrl;
+    }
+    repoText = `\u001b]8;;file://${projectUrl}\u0007${repo}\u001b]8;;\u0007`;
+  }
+
   const SEP_PAD = ` ${colorSep}${SEP}${R} `;
   const line1Parts = [
     `${colorModel}${B}${displayModel}${R}`,
-    `${colorRepo}${repo}${R}${branchStr}`,
+    `${colorRepo}${repoText}${R}${branchStr}`,
     `${stateColor}${B}${stateGlyph}${R} ${stateColor}${B}${state}${R}`
   ];
 
   // Append Cost, Speed, RAM if minimal or essential
   if (config.preset === 'minimal' || config.preset === 'essential') {
     const extras = [];
-    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}$${totalCost.toFixed(3)}${R}`);
+    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
     if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
     if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
     if (extras.length > 0) {
@@ -839,7 +953,7 @@ function runHud(raw) {
       return `${colorLabel}${label}${R} ${col}${pct}%${R}${rStr}`;
     }
 
-    return `${colorLabel}${label}${R} ${col}${bar(pct, bLen)}${R} ${White}${pct}%${R}${rStr}`;
+    return `${colorLabel}${label}${R} ${col}${bar(pct, bLen)}${R} ${col}${pct}%${R}${rStr}`;
   }
 
   const ctxBarStr = barLen > 0 ? ` ${colorSuccess}${bar(ctxPct, barLen)}${R}` : '';
@@ -858,7 +972,7 @@ function runHud(raw) {
   // Append Cost, Speed, RAM if full preset
   if (config.preset === 'full') {
     const extras = [];
-    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}$${totalCost.toFixed(3)}${R}`);
+    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
     if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
     if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
     if (extras.length > 0) {
@@ -895,8 +1009,17 @@ function runHud(raw) {
   const mode = j.auto_mode || j.planning_mode || j.automation_mode
     || j.approval_mode || j.mode || '--';
 
-  let line4 = `${Mag}${FAST}${R} ${colorLabel}auto mode${R} ${White}${mode}${R}`
-    + ` ${colorSuccess}${DOT}${R} ${White}${shellCount} shell${R}`;
+  let shellText = `${shellCount} shell`;
+  if (ENABLE_LINKS && resolvedTPath) {
+    let tUrl = resolvedTPath.replace(/\\/g, '/');
+    if (!tUrl.startsWith('/')) {
+      tUrl = '/' + tUrl;
+    }
+    shellText = `\u001b]8;;file://${tUrl}\u0007${shellCount} shell\u001b]8;;\u0007`;
+  }
+
+  let line4 = `${colorAuto}${FAST} auto mode ${mode}${R}`
+    + ` ${colorSuccess}${DOT}${R} ${White}${shellText}${R}`;
 
   if (taskCount > 0) {
     line4 += ` ${colorSuccess}${DOT}${R} ${White}${taskCount} tasks${R}`;
