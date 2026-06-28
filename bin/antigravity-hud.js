@@ -62,6 +62,64 @@ if (NO_COLOR) {
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 
+const LIKELY_KEYS = [
+  'toolPermission',
+  'tool_permission',
+  'toolPermissionMode',
+  'tool_permission_mode',
+  'permissionMode',
+  'permissionsMode',
+  'approvalMode',
+  'approval_mode'
+];
+
+function getExistingPermissionKey(settings) {
+  for (const key of LIKELY_KEYS) {
+    if (key in settings) return key;
+  }
+  return null;
+}
+
+function readSettings() {
+  const settingsFile = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
+  if (!fs.existsSync(settingsFile)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeSettings(settings) {
+  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+  const settingsFile = path.join(settingsDir, 'settings.json');
+  try {
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`  ${Red}[!] Failed to write settings.json:${R}`, err.message);
+    process.exit(1);
+  }
+}
+
+function backupSettings() {
+  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+  const settingsFile = path.join(settingsDir, 'settings.json');
+  if (!fs.existsSync(settingsFile)) return;
+  const pad = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const backupName = `settings.json.backup-antigravity-hud-${ts}`;
+  const backupPath = path.join(settingsDir, backupName);
+  try {
+    fs.copyFileSync(settingsFile, backupPath);
+    console.log(`  ${Green}[OK] Backed up settings to: ${backupName}${R}`);
+  } catch (err) {
+    console.error(`  ${Red}[!] Failed to backup settings.json:${R}`, err.message);
+    process.exit(1);
+  }
+}
+
 /** Format large numbers: 1.2m, 29.5k, or integer string. */
 function fmtNum(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'm';
