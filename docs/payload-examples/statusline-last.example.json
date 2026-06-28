@@ -1,0 +1,60 @@
+{
+  "cwd": "C:\\Users\\dev\\Projects\\my-app",
+  "session_id": "abc12345-6789-0def-abcd-ef0123456789",
+  "conversation_id": "abc12345-6789-0def-abcd-ef0123456789",
+  "transcript_path": "C:\\Users\\dev\\.gemini\\antigravity-cli\\brain\\abc12345-6789-0def-abcd-ef0123456789\\.system_generated\\logs\\transcript.jsonl",
+  "model": {
+    "id": "Claude Opus 4.6 (Thinking)",
+    "display_name": "Claude Opus 4.6 (Thinking)"
+  },
+  "workspace": {
+    "current_dir": "C:\\Users\\dev\\Projects\\my-app",
+    "project_dir": "C:\\Users\\dev\\Projects\\my-app"
+  },
+  "version": "1.0.13",
+  "context_window": {
+    "total_input_tokens": 48210,
+    "total_output_tokens": 3871,
+    "context_window_size": 250000,
+    "used_percentage": 20.8324,
+    "remaining_percentage": 79.1676,
+    "current_usage": {
+      "input_tokens": 8420,
+      "output_tokens": 1205,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 35000
+    }
+  },
+  "exceeds_200k_tokens": false,
+  "product": "antigravity",
+  "quota": {
+    "3p-5h": {
+      "remaining_fraction": 0.72,
+      "reset_time": "2026-06-28T12:00:00Z",
+      "reset_in_seconds": 10800
+    },
+    "3p-weekly": {
+      "remaining_fraction": 0.91,
+      "reset_time": "2026-07-05T00:00:00Z",
+      "reset_in_seconds": 561600
+    },
+    "gemini-5h": {
+      "remaining_fraction": 0.85,
+      "reset_time": "2026-06-28T12:00:00Z",
+      "reset_in_seconds": 10800
+    },
+    "gemini-weekly": {
+      "remaining_fraction": 0.97,
+      "reset_time": "2026-07-05T00:00:00Z",
+      "reset_in_seconds": 561600
+    }
+  },
+  "agent_state": "tool_use",
+  "sandbox": {
+    "enabled": false
+  },
+  "plan_tier": "Google AI Pro",
+  "email": "user@example.com",
+  "tool_confirmation_pending": true,
+  "terminal_width": 158
+}

@@ -1,0 +1,39 @@
+{
+  "name": "antigravity-hud",
+  "version": "0.1.0",
+  "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI — quota bars, context windows, tool tallies, and vibes.",
+  "main": "bin/antigravity-hud.js",
+  "bin": {
+    "antigravity-hud": "bin/antigravity-hud.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "antigravity",
+    "gemini",
+    "claude",
+    "statusline",
+    "hud",
+    "cli",
+    "devtools"
+  ],
+  "author": "KK",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phenom64/antigravity-hud.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "legacy/",
+    "scripts/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}
