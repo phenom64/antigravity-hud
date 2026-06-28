@@ -73,7 +73,11 @@ const LIKELY_KEYS = [
   'approval_mode'
 ];
 
+const SETTINGS_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.json');
+
 function getExistingPermissionKey(settings) {
+  if (!settings || typeof settings !== 'object') return null;
   for (const key of LIKELY_KEYS) {
     if (key in settings) return key;
   }
@@ -81,42 +85,37 @@ function getExistingPermissionKey(settings) {
 }
 
 function readSettings() {
-  const settingsFile = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
-  if (!fs.existsSync(settingsFile)) return {};
+  if (!fs.existsSync(SETTINGS_FILE)) return {};
   try {
-    return JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
   } catch (_) {
     return {};
   }
 }
 
 function writeSettings(settings) {
-  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  const settingsFile = path.join(settingsDir, 'settings.json');
   try {
-    fs.mkdirSync(settingsDir, { recursive: true });
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf8');
+    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
   } catch (err) {
     console.error(`  ${Red}[!] Failed to write settings.json:${R}`, err.message);
-    process.exit(1);
+    throw err;
   }
 }
 
 function backupSettings() {
-  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  const settingsFile = path.join(settingsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) return;
+  if (!fs.existsSync(SETTINGS_FILE)) return;
   const pad = n => String(n).padStart(2, '0');
   const now = new Date();
   const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const backupName = `settings.json.backup-antigravity-hud-${ts}`;
-  const backupPath = path.join(settingsDir, backupName);
+  const backupPath = path.join(SETTINGS_DIR, backupName);
   try {
-    fs.copyFileSync(settingsFile, backupPath);
+    fs.copyFileSync(SETTINGS_FILE, backupPath);
     console.log(`  ${Green}[OK] Backed up settings to: ${backupName}${R}`);
   } catch (err) {
     console.error(`  ${Red}[!] Failed to backup settings.json:${R}`, err.message);
-    process.exit(1);
+    throw err;
   }
 }
 
