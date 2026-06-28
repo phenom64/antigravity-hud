@@ -684,6 +684,11 @@ function runDoctor() {
     }
   } catch (_) {}
 
+  const permKey = getExistingPermissionKey(settings) || 'toolPermission';
+  const permVal = settings[permKey] || 'request-review';
+  console.log(`  ${White}Tool Permission Key:${R} ${permKey}`);
+  console.log(`  ${White}Tool Permission Mode:${R} ${permVal}`);
+
   const currentStatusLine = settings.statusLine;
   console.log(`\n  ${White}Current statusLine configuration:${R}`);
   if (currentStatusLine) {
