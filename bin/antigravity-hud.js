@@ -9,7 +9,7 @@
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // ─── ENV FLAGS ─────────────────────────────────────────────────────────────────
 const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1';
@@ -49,7 +49,7 @@ function fmtNum(n) {
   return String(Math.round(n));
 }
 
-/** Render a progress bar: █░ with clamped percentage. */
+/** Render a progress bar: filled + empty blocks, percentage clamped 0-100. */
 function bar(pct, len) {
   if (len <= 0) return '';
   pct = Math.max(0, Math.min(100, pct));
@@ -77,11 +77,6 @@ function quotaColor(pct) {
   return Red;
 }
 
-/** Strip ANSI escape sequences (for length calculations). */
-function stripAnsi(s) {
-  return s.replace(/\x1b\[[0-9;]*m/g, '');
-}
-
 /** Safely get a nested property. */
 function dig(obj, ...keys) {
   let cur = obj;
@@ -90,6 +85,19 @@ function dig(obj, ...keys) {
     cur = cur[k];
   }
   return cur;
+}
+
+/**
+ * Cross-platform basename that handles both Windows backslash and Unix forward
+ * slash separators regardless of the host OS. path.basename() only splits on
+ * the host separator, so a Linux host given "C:\\Users\\dev\\project" would
+ * return the whole string.
+ */
+function basenameAny(p) {
+  if (!p) return '';
+  // Split on whichever slash comes last
+  const last = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+  return last || p;
 }
 
 // ─── READ STDIN ────────────────────────────────────────────────────────────────
@@ -109,7 +117,7 @@ try {
 // ─── DATA EXTRACTION ──────────────────────────────────────────────────────────
 const model    = dig(j, 'model', 'display_name') || dig(j, 'model', 'id') || 'unknown model';
 const project  = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || process.cwd();
-const repo     = path.basename(project);
+const repo     = basenameAny(project);
 const cols     = j.terminal_width || 120;
 const state    = j.agent_state || 'idle';
 
@@ -154,14 +162,14 @@ if (layout === 'tiny') {
 let branch = '';
 let dirty  = '';
 try {
-  branch = execSync(`git -C "${project}" branch --show-current`, {
+  branch = execFileSync('git', ['-C', project, 'branch', '--show-current'], {
     timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
   }).trim();
 } catch (_) { /* not a git repo or git unavailable */ }
 
 if (branch) {
   try {
-    const status = execSync(`git -C "${project}" status --porcelain`, {
+    const status = execFileSync('git', ['-C', project, 'status', '--porcelain'], {
       timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
     if (status.length > 0) dirty = '*';
@@ -201,6 +209,10 @@ function findFiles(dir, target) {
 
 /** Locate the best transcript.jsonl to parse. */
 function resolveTranscript() {
+  // 0. AGY_HUD_TRANSCRIPT env override (handy for local testing)
+  if (process.env.AGY_HUD_TRANSCRIPT) {
+    try { if (fs.existsSync(process.env.AGY_HUD_TRANSCRIPT)) return process.env.AGY_HUD_TRANSCRIPT; } catch (_) {}
+  }
   // 1. Explicit path from payload
   if (j.transcript_path) {
     try { if (fs.existsSync(j.transcript_path)) return j.transcript_path; } catch (_) {}

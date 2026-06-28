@@ -1,7 +1,7 @@
 {
   "name": "antigravity-hud",
   "version": "0.1.0",
-  "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI — quota bars, context windows, tool tallies, and vibes.",
+  "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI: quota bars, context windows, tool tallies, and vibes.",
   "main": "bin/antigravity-hud.js",
   "bin": {
     "antigravity-hud": "bin/antigravity-hud.js"
