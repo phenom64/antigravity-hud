@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-28
+
+### Added
+
+- 🎉 Proper one-shot CLI setup flow with subcommands:
+  - `antigravity-hud install` - Patches settings.json and creates a timestamped backup of the previous configuration
+  - `antigravity-hud doctor` - Diagnostics tool that prints OS, Node version, settings status, and runs a sample payload render test
+  - `antigravity-hud uninstall` - Disables the statusLine configuration without destroying other user settings
+  - `antigravity-hud --help` / `-h` - Displays subcommand usage instructions
+- Support for `AGY_HUD_TRANSCRIPT` env var to point to a specific transcript JSONL file for local tests
+- Added `quotaPct` helper so missing or empty quotas default to 100% remaining
+- Fixed activeAgents logic so if transcript reports 0 active subagents, it shows 0 agents and does not fall back to invoked counts
+- Robust `basenameAny` helper to support Windows and Unix paths on any host OS
+- Robust subprocess git calls via `execFileSync` instead of `execSync` to prevent quote/shell issues
+
 ## [0.1.0] - 2026-06-28
 
 ### Added

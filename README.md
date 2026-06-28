@@ -43,23 +43,46 @@ The HUD helps you keep an eye on quota so you can switch models before you hit t
 
 ### Quick start
 
-```bash
-npm install -g antigravity-hud
-```
-
-Then run the install script to patch your Antigravity CLI settings:
+Run the following command to install the package globally and configure it automatically:
 
 **Windows (PowerShell):**
 ```powershell
-& "$(npm root -g)/antigravity-hud/scripts/install.ps1"
+npm install -g @phenom64/antigravity-hud; antigravity-hud install
 ```
 
 **macOS / Linux:**
 ```bash
-bash "$(npm root -g)/antigravity-hud/scripts/install.sh"
+npm install -g @phenom64/antigravity-hud && antigravity-hud install
 ```
 
-### Manual setup
+**Using npx (no global install required):**
+```bash
+npx @phenom64/antigravity-hud install
+```
+
+The `install` subcommand automatically creates the settings directory if it's missing, patches your `~/.gemini/antigravity-cli/settings.json` file, and creates a timestamped backup of your previous settings (e.g. `settings.json.backup-antigravity-hud-YYYYMMDD-HHMMSS`).
+
+### Verify installation
+
+Run the diagnostics check to verify everything is set up correctly:
+
+```bash
+antigravity-hud doctor
+```
+
+This will check that the binary is on your PATH, print your current configuration, and render a live sample of the HUD.
+
+### Uninstalling
+
+To disable the HUD, run:
+
+```bash
+antigravity-hud uninstall
+```
+
+This will set `enabled: false` in your configuration without destroying other settings, and list your backup files with instructions on how to restore them.
+
+### Manual setup / Legacy helpers
 
 If you prefer to configure manually, edit `~/.gemini/antigravity-cli/settings.json`:
 
@@ -73,7 +96,8 @@ If you prefer to configure manually, edit `~/.gemini/antigravity-cli/settings.js
 }
 ```
 
-Then restart your Antigravity CLI session. The HUD will appear automatically.
+Legacy manual installation scripts are also available under `scripts/install.ps1` and `scripts/install.sh`.
+
 
 ## How it works
 
