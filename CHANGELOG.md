@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-28
+
+### Added
+- 🎨 Custom Default Colours:
+  - Default colour overrides closer to Claude HUD (`quotaHigh`, `quotaMid`, `quotaLow`, `quotaCritical`, `auto`, `git`)
+  - Quotas now transition to purple/blue (`#8EA2FF`) when >50% healthy, and render percentage in the same colour
+  - Orange styling unified across the auto mode Line 4 segment
+- 📊 Metrics Polish:
+  - Cost metrics marked clearly as approximate (`~$0.041` / `~cost`)
+  - Relocated model rates into a `MODEL_PRICING` object with stale-warning comments
+- 🛠️ Robust Tool Categorisation:
+  - Remapped tool triggers (browser, read, search, write, edit, bash, agent, task, ask, image)
+  - Map unknown tool calls to `tool` instead of dropping them
+- 🏎️ Performance Optimisation:
+  - Cache resolved transcript path in `antigravity-hud-state.json` to skip recursive folder scans
+  - Bounded transcript reads to the last 256KB of the log file
+- 🔗 Terminal Hyperlinks:
+  - Added experimental OSC 8 hyperlink support (`AGY_HUD_LINKS=1`) for project directory and transcript path
+
 ## [0.3.0] - 2026-06-28
 
 ### Added
