@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-06-28
+
+### Added
+- 🔒 Dynamic Tool Permission Management:
+  - Added CLI `mode` commands to inspect, cycle (`mode next`), and set (`mode review|auto|yolo|strict`) Antigravity's tool permission confirmation modes.
+  - Added CLI `bind-shift-tab` to explain keybinding constraints for external commands.
+  - Render dynamic color-coded and layout-dependent permission labels on the HUD: `review` (amber `#FFD166`), `auto mode`/`auto` (orange), `bypass permissions (YOLO)`/`YOLO` (hot pink `#FF3B8A`), and `strict` (icy blue-grey `#8EA2FF`).
+  - Added `doctor` diagnostic output for active permission key and mode.
+  - Integrated settings backups and robust error recovery to prevent settings corruption on parse failures.
+
 ## [0.3.1] - 2026-06-28
 
 ### Added
