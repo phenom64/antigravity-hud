@@ -69,6 +69,39 @@ antigravity-hud doctor
 
 This will check that the binary is on your PATH, print your current configuration, and render a live sample of the HUD.
 
+### Configuration
+
+You can customize layout presets, toggle features (like cost tracking, streaming speed, or RAM usage), and adjust settings using the interactive CLI wizard:
+
+```bash
+antigravity-hud configure
+```
+
+This writes your configuration to `~/.gemini/antigravity-cli/antigravity-hud-config.json` with the following schema:
+
+```json
+{
+  "preset": "full",
+  "showCost": true,
+  "showSpeed": true,
+  "showMemory": true,
+  "colorMode": true,
+  "unicodeMode": true,
+  "colors": {
+    "model": "cyan",
+    "project": "yellow",
+    "git": "brightBlue",
+    "label": "gray"
+  }
+}
+```
+
+#### Presets
+
+*   **`full`** (default): The standard 4-line HUD containing everything (model, repo, git, spinner, context, quotas, tool tallies, cost, speed, RAM, and shell stats).
+*   **`essential`**: A clean 2-line HUD containing model, repo, git, spinner, context usage, quotas, and toggled metrics (cost/speed/RAM) appended to Line 1.
+*   **`minimal`**: A minimal 1-line HUD showing model, repo, git status, spinner, and toggled metrics.
+
 ### Uninstalling
 
 To disable the HUD, run:

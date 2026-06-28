@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-28
+
+### Added
+- ⚙️ Interactive Configuration Wizard:
+  - Run `antigravity-hud configure` (or `setup`) to adjust layout presets, toggle features, and save custom preferences
+- 📊 Metrics & Performance Toggles:
+  - **Preset Layouts:** `full` (4 lines), `essential` (2 lines), or `minimal` (1 line) layouts
+  - **Session Cost Tracking:** Live USD calculation based on active model input/output tokens
+  - **Generation Speed:** Real-time token streaming rate estimation (`tok/s`)
+  - **System Memory:** Dynamic, zero-latency RAM monitoring (`RAM %`)
+- 🎨 Custom Colors Support:
+  - Customizable ANSI color codes, 8-bit color codes, and 24-bit Truecolor hex codes (#rrggbb) resolved from config file
+  - Support for custom separator, model, project, git branch, label, active, and success color overrides
+
 ## [0.2.1] - 2026-06-28
 
 ### Added

@@ -9,11 +9,30 @@
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
+const readline = require('readline');
 const { execFileSync } = require('child_process');
 
+// ─── CONFIGURATION LOADING ─────────────────────────────────────────────────────
+const configPath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-config.json');
+let config = {
+  preset: 'full',
+  showCost: true,
+  showSpeed: true,
+  showMemory: false,
+  colorMode: true,
+  unicodeMode: true,
+  colors: {}
+};
+try {
+  if (fs.existsSync(configPath)) {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config = Object.assign(config, parsed);
+  }
+} catch (_) {}
+
 // ─── ENV FLAGS ─────────────────────────────────────────────────────────────────
-const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1';
-const NO_UNICODE = process.env.AGY_HUD_NO_UNICODE === '1';
+const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1' || config.colorMode === false;
+const NO_UNICODE = process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false;
 const NO_SPINNER = process.env.AGY_HUD_NO_SPINNER === '1';
 
 // ─── UNICODE / ASCII GLYPHS ───────────────────────────────────────────────────
@@ -85,6 +104,113 @@ function quotaPct(q) {
   if (!Number.isFinite(pct)) return 100;
 
   return Math.max(0, Math.min(100, pct));
+}
+
+const ANSI_BY_NAME = {
+  dim: '\x1b[2m',
+  red: '\x1b[91m',
+  green: '\x1b[92m',
+  yellow: '\x1b[93m',
+  magenta: '\x1b[95m',
+  cyan: '\x1b[96m',
+  brightblue: '\x1b[94m',
+  brightmagenta: '\x1b[95m',
+  white: '\x1b[97m',
+  gray: '\x1b[90m',
+  orange: '\x1b[38;5;208m',
+};
+
+function resolveColor(value, fallback) {
+  if (NO_COLOR) return '';
+  if (!value) return fallback;
+  if (typeof value === 'number') {
+    return `\x1b[38;5;${value}m`;
+  }
+  if (typeof value === 'string') {
+    if (value.startsWith('#') && value.length === 7) {
+      const r = parseInt(value.slice(1, 3), 16);
+      const g = parseInt(value.slice(3, 5), 16);
+      const b = parseInt(value.slice(5, 7), 16);
+      return `\x1b[38;2;${r};${g};${b}m`;
+    }
+    const nameColor = ANSI_BY_NAME[value.toLowerCase()];
+    if (nameColor) return nameColor;
+  }
+  return fallback;
+}
+
+function getRamUsage() {
+  try {
+    const total = os.totalmem();
+    const free = os.freemem();
+    const used = total - free;
+    const pct = Math.round((used / total) * 100);
+    const gb = bytes => (bytes / (1024 * 1024 * 1024)).toFixed(1);
+    return { pct, used: gb(used), total: gb(total) };
+  } catch (_) {
+    return { pct: 0, used: '0.0', total: '0.0' };
+  }
+}
+
+function estimateCost(modelName, inTokens, outTokens) {
+  let inPrice = 3.0; // fallback pricing ($/M tokens)
+  let outPrice = 15.0;
+
+  const modelLower = modelName.toLowerCase();
+  if (modelLower.includes('opus')) {
+    inPrice = 15.0;
+    outPrice = 75.0;
+  } else if (modelLower.includes('sonnet')) {
+    inPrice = 3.0;
+    outPrice = 15.0;
+  } else if (modelLower.includes('haiku')) {
+    inPrice = 0.8;
+    outPrice = 4.0;
+  } else if (modelLower.includes('gemini-1.5-pro') || modelLower.includes('gemini 1.5 pro')) {
+    inPrice = 1.25;
+    outPrice = 5.0;
+  } else if (modelLower.includes('gemini-1.5-flash') || modelLower.includes('gemini 1.5 flash') ||
+             modelLower.includes('gemini-2.0-flash') || modelLower.includes('gemini 2.0 flash') ||
+             modelLower.includes('gemini-3.5-flash') || modelLower.includes('gemini 3.5 flash')) {
+    inPrice = 0.075;
+    outPrice = 0.3;
+  }
+
+  const inputUsd = (inTokens / 1000000) * inPrice;
+  const outputUsd = (outTokens / 1000000) * outPrice;
+  return inputUsd + outputUsd;
+}
+
+function getSpeed(currentTokens, cachePath) {
+  let cache = { lastTokens: 0, lastTimestamp: 0, lastSpeed: 0 };
+  try {
+    if (fs.existsSync(cachePath)) {
+      cache = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    }
+  } catch (_) {}
+
+  const now = Date.now();
+  const dt = (now - cache.lastTimestamp) / 1000;
+  let speed = cache.lastSpeed || 0;
+
+  if (dt >= 0.5) {
+    const dTokens = currentTokens - cache.lastTokens;
+    if (dTokens > 0) {
+      speed = dTokens / dt;
+    } else if (dTokens < 0) {
+      speed = 0; // reset
+    } else {
+      if (dt > 3) speed = 0; // idle decay
+    }
+    try {
+      fs.writeFileSync(cachePath, JSON.stringify({
+        lastTokens: currentTokens,
+        lastTimestamp: now,
+        lastSpeed: speed
+      }), 'utf8');
+    } catch (_) {}
+  }
+  return speed;
 }
 
 /** Safely get a nested property. */
@@ -177,6 +303,8 @@ if (arg === 'install') {
   runDoctor();
 } else if (arg === 'uninstall') {
   runUninstall();
+} else if (arg === 'configure' || arg === 'setup') {
+  runConfigure();
 } else if (arg === '--help' || arg === '-h') {
   runHelp();
 } else {
@@ -403,6 +531,85 @@ function runUninstall() {
   console.log(`\n  Uninstall process complete.${R}\n`);
 }
 
+function askQuestion(query) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise(resolve => rl.question(query, ans => {
+    rl.close();
+    resolve(ans.trim());
+  }));
+}
+
+async function runConfigure() {
+  console.log(`\n  ${B}${Cyan}antigravity-hud configuration wizard${R}`);
+  console.log(`  ${Gray}====================================${R}\n`);
+
+  const confPath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-config.json');
+  let current = {};
+  try {
+    if (fs.existsSync(confPath)) {
+      current = JSON.parse(fs.readFileSync(confPath, 'utf8'));
+    }
+  } catch (_) {}
+
+  // 1. Preset
+  console.log(`  ${White}Choose a layout preset:${R}`);
+  console.log(`    1) Full      - Show all details (4 lines)`);
+  console.log(`    2) Essential - Show essentials (2 lines)`);
+  console.log(`    3) Minimal   - Show compact summary (1 line)`);
+  const curPreset = current.preset || 'full';
+  const pChoice = await askQuestion(`  Select preset (1-3) [current: ${curPreset}]: `);
+  let preset = curPreset;
+  if (pChoice === '1') preset = 'full';
+  else if (pChoice === '2') preset = 'essential';
+  else if (pChoice === '3') preset = 'minimal';
+
+  // 2. Cost
+  const curCost = current.showCost !== false ? 'y' : 'n';
+  const costAns = await askQuestion(`  Enable USD session cost tracking? (y/n) [current: ${curCost}]: `);
+  const showCost = costAns ? (costAns.toLowerCase() === 'y') : (current.showCost !== false);
+
+  // 3. Speed
+  const curSpeed = current.showSpeed !== false ? 'y' : 'n';
+  const speedAns = await askQuestion(`  Enable token generation speed (tok/s)? (y/n) [current: ${curSpeed}]: `);
+  const showSpeed = speedAns ? (speedAns.toLowerCase() === 'y') : (current.showSpeed !== false);
+
+  // 4. Memory
+  const curMemory = current.showMemory === true ? 'y' : 'n';
+  const memoryAns = await askQuestion(`  Enable system RAM monitoring? (y/n) [current: ${curMemory}]: `);
+  const showMemory = memoryAns ? (memoryAns.toLowerCase() === 'y') : (current.showMemory === true);
+
+  // 5. Colors
+  const curColor = current.colorMode !== false ? 'y' : 'n';
+  const colorAns = await askQuestion(`  Enable ANSI colors? (y/n) [current: ${curColor}]: `);
+  const colorMode = colorAns ? (colorAns.toLowerCase() === 'y') : (current.colorMode !== false);
+
+  // 6. Unicode
+  const curUnicode = current.unicodeMode !== false ? 'y' : 'n';
+  const unicodeAns = await askQuestion(`  Use Unicode glyphs (reverts to ASCII if disabled)? (y/n) [current: ${curUnicode}]: `);
+  const unicodeMode = unicodeAns ? (unicodeAns.toLowerCase() === 'y') : (current.unicodeMode !== false);
+
+  const newConfig = {
+    preset,
+    showCost,
+    showSpeed,
+    showMemory,
+    colorMode,
+    unicodeMode,
+    colors: current.colors || {}
+  };
+
+  try {
+    fs.mkdirSync(path.dirname(confPath), { recursive: true });
+    fs.writeFileSync(confPath, JSON.stringify(newConfig, null, 2), 'utf8');
+    console.log(`\n  ${Green}[OK] Configuration saved successfully to:${R}\n  ${confPath}\n`);
+  } catch (err) {
+    console.error(`\n  ${Red}[!] Failed to save configuration:${R}`, err.message);
+  }
+}
+
 function runHelp() {
   console.log(`
   ${B}${Cyan}antigravity-hud${R}
@@ -410,6 +617,7 @@ function runHelp() {
   Usage:
     ${White}antigravity-hud${R}           Read statusline JSON from stdin and render the HUD (default)
     ${White}antigravity-hud install${R}   Configure Antigravity CLI settings to use this HUD
+    ${White}antigravity-hud configure${R} Open the interactive configuration wizard
     ${White}antigravity-hud doctor${R}    Check install status and run a sample render test
     ${White}antigravity-hud uninstall${R} Remove or disable the HUD configuration
 
@@ -435,6 +643,21 @@ function runHud(raw) {
   const ctxOut   = dig(j, 'context_window', 'total_output_tokens') || 0;
   const ctxSize  = dig(j, 'context_window', 'context_window_size') || 1;
   const ctxPct   = dig(j, 'context_window', 'used_percentage')     || 0;
+
+  // ─── RESOLVE COLORS ────────────────────────────────────────────────────────────
+  const colorModel   = resolveColor(config.colors.model, `${Cyan}`);
+  const colorRepo    = resolveColor(config.colors.project, `${Yellow}`);
+  const colorGit     = resolveColor(config.colors.git, `${Blue}`);
+  const colorLabel   = resolveColor(config.colors.label, `${Gray}`);
+  const colorSep     = resolveColor(config.colors.separator, `${Yellow}`);
+  const colorActive  = resolveColor(config.colors.active, `${Cyan}`);
+  const colorSuccess = resolveColor(config.colors.success, `${Green}`);
+
+  // ─── CALCULATE COST, SPEED, RAM ────────────────────────────────────────────────
+  const totalCost   = estimateCost(model, ctxIn, ctxOut);
+  const cachePath   = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'speed-cache.json');
+  const streamSpeed = getSpeed(ctxOut, cachePath);
+  const ram         = getRamUsage();
 
   // ─── LAYOUT ────────────────────────────────────────────────────────────────────
   let layout = cols >= 118 ? 'normal' : cols >= 92 ? 'compact' : 'tiny';
@@ -567,56 +790,82 @@ function runHud(raw) {
   let stateGlyph;
   if (!NO_SPINNER && isActive) {
     const frame = Math.floor(Date.now() / 120) % SPINNER_FRAMES.length;
-    stateGlyph  = `${Cyan}${SPINNER_FRAMES[frame]}${R}`;
+    stateGlyph  = `${colorActive}${SPINNER_FRAMES[frame]}${R}`;
   } else {
-    stateGlyph = isActive ? `${Cyan}${DOT}${R}` : `${Green}${DOT}${R}`;
+    stateGlyph = isActive ? `${colorActive}${DOT}${R}` : `${colorSuccess}${DOT}${R}`;
   }
 
   // ─── LINE 1: Model │ repo git:(branch*) │ ● state ─────────────────────────────
-  const stateColor = isActive ? Cyan : Green;
+  const stateColor = isActive ? colorActive : colorSuccess;
   const branchStr = branch
     ? (layout === 'tiny'
-        ? ` ${Gray}(${Blue}${branch}${dirty}${Gray})${R}`
-        : ` ${Gray}git:(${Blue}${branch}${dirty}${Gray})${R}`)
+        ? ` ${colorLabel}(${colorGit}${branch}${dirty}${colorLabel})${R}`
+        : ` ${colorLabel}git:(${colorGit}${branch}${dirty}${colorLabel})${R}`)
     : '';
 
-  const SEP_PAD = ` ${SEP} `;
-  const line1 = `${Cyan}${B}${displayModel}${R}${SEP_PAD}${Yellow}${repo}${R}${branchStr}`
-    + `${SEP_PAD}${stateColor}${B}${stateGlyph}${R} ${stateColor}${B}${state}${R}`;
+  const SEP_PAD = ` ${colorSep}${SEP}${R} `;
+  const line1Parts = [
+    `${colorModel}${B}${displayModel}${R}`,
+    `${colorRepo}${repo}${R}${branchStr}`,
+    `${stateColor}${B}${stateGlyph}${R} ${stateColor}${B}${state}${R}`
+  ];
+
+  // Append Cost, Speed, RAM if minimal or essential
+  if (config.preset === 'minimal' || config.preset === 'essential') {
+    const extras = [];
+    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}$${totalCost.toFixed(3)}${R}`);
+    if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
+    if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
+    if (extras.length > 0) {
+      line1Parts.push(extras.join(` ${colorSep}${SEP}${R} `));
+    }
+  }
+  const line1 = line1Parts.join(SEP_PAD);
 
   // ─── LINE 2: ctx bar │ 5h bar │ wk bar ────────────────────────────────────────
   function quotaSegment(label, pct, resetSec, bLen) {
     const col   = quotaColor(pct);
     const reset = fmtReset(resetSec);
-    const rStr  = reset ? ` ${Gray}${reset}${R}` : '';
+    const rStr  = reset ? ` ${colorLabel}${reset}${R}` : '';
 
     if (pct <= 0) {
       if (bLen <= 0) {
-        return `${Gray}${label}${R} ${Red}${WARN} limit${R}${rStr}`;
+        return `${colorLabel}${label}${R} ${Red}${WARN} limit${R}${rStr}`;
       }
-      return `${Gray}${label}${R} ${Red}${WARN} Limit reached${R}${rStr}`;
+      return `${colorLabel}${label}${R} ${Red}${WARN} Limit reached${R}${rStr}`;
     }
 
     if (bLen <= 0) {
-      return `${Gray}${label}${R} ${col}${pct}%${R}${rStr}`;
+      return `${colorLabel}${label}${R} ${col}${pct}%${R}${rStr}`;
     }
 
-    return `${Gray}${label}${R} ${col}${bar(pct, bLen)}${R} ${White}${pct}%${R}${rStr}`;
+    return `${colorLabel}${label}${R} ${col}${bar(pct, bLen)}${R} ${White}${pct}%${R}${rStr}`;
   }
 
-  const ctxBarStr = barLen > 0 ? ` ${Green}${bar(ctxPct, barLen)}${R}` : '';
+  const ctxBarStr = barLen > 0 ? ` ${colorSuccess}${bar(ctxPct, barLen)}${R}` : '';
   let ctxLabel;
   if (layout === 'tiny') {
-    ctxLabel = `${Gray}ctx${R} ${Green}${Math.round(ctxPct)}%${R} ${Gray}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
+    ctxLabel = `${colorLabel}ctx${R} ${colorSuccess}${Math.round(ctxPct)}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
   } else {
-    ctxLabel = `${Gray}ctx${R}${ctxBarStr} ${White}${B}${Math.round(ctxPct)}%${R}`
-      + ` ${Gray}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`;
+    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${Math.round(ctxPct)}%${R}`
+      + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`;
   }
 
   const seg5h = quotaSegment('5h', q5hPct, q5h.reset_in_seconds, barLen);
   const segWk = quotaSegment('wk', qWkPct, qWk.reset_in_seconds, barLen);
 
-  const line2 = `${ctxLabel}${SEP_PAD}${seg5h}${SEP_PAD}${segWk}`;
+  const line2Parts = [ctxLabel, seg5h, segWk];
+  // Append Cost, Speed, RAM if full preset
+  if (config.preset === 'full') {
+    const extras = [];
+    if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}$${totalCost.toFixed(3)}${R}`);
+    if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
+    if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
+    if (extras.length > 0) {
+      line2Parts.push(extras.join(` ${colorSep}${SEP}${R} `));
+    }
+  }
+  const line2 = line2Parts.join(SEP_PAD);
 
   // ─── LINE 3: Tool usage ───────────────────────────────────────────────────────
   const toolEntries = Object.keys(toolCounts).map(cat => ({
@@ -633,31 +882,38 @@ function runHud(raw) {
   if (topTools.length > 0) {
     const parts = topTools.map(t => {
       if (layout === 'tiny') {
-        return `${Green}${CHECK}${R}${White}${t.cat}${R}${Gray}${TIMES}${Math.min(t.count, 99)}${R}`;
+        return `${colorSuccess}${CHECK}${R}${White}${t.cat}${R}${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`;
       }
-      return `${Green}${CHECK}${R} ${White}${t.cat}${R} ${Gray}${TIMES}${Math.min(t.count, 99)}${R}`;
+      return `${colorSuccess}${CHECK}${R} ${White}${t.cat}${R} ${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`;
     });
-    line3 = parts.join(` ${Yellow}${SEP}${R} `) + ` ${Yellow}${SEP}${R}`;
+    line3 = parts.join(` ${colorSep}${SEP}${R} `) + ` ${colorSep}${SEP}${R}`;
   } else {
-    line3 = `${Gray}--${R} ${Yellow}${SEP}${R}`;
+    line3 = `${colorLabel}--${R} ${colorSep}${SEP}${R}`;
   }
 
   // ─── LINE 4: auto mode │ shell │ tasks │ agents ───────────────────────────────
   const mode = j.auto_mode || j.planning_mode || j.automation_mode
     || j.approval_mode || j.mode || '--';
 
-  let line4 = `${Mag}${FAST}${R} ${Gray}auto mode${R} ${White}${mode}${R}`
-    + ` ${Green}${DOT}${R} ${White}${shellCount} shell${R}`;
+  let line4 = `${Mag}${FAST}${R} ${colorLabel}auto mode${R} ${White}${mode}${R}`
+    + ` ${colorSuccess}${DOT}${R} ${White}${shellCount} shell${R}`;
 
   if (taskCount > 0) {
-    line4 += ` ${Green}${DOT}${R} ${White}${taskCount} tasks${R}`;
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${taskCount} tasks${R}`;
   }
 
-  line4 += ` ${Green}${DOT}${R} ${White}${agentCount} agents${R}`;
+  line4 += ` ${colorSuccess}${DOT}${R} ${White}${agentCount} agents${R}`;
 
-  // ─── OUTPUT ────────────────────────────────────────────────────────────────────
-  process.stdout.write(line1 + '\n');
-  process.stdout.write(line2 + '\n');
-  process.stdout.write(line3 + '\n');
-  process.stdout.write(line4 + '\n');
+  // ─── OUTPUT PRESET-BASED RENDERING ─────────────────────────────────────────────
+  if (config.preset === 'minimal') {
+    process.stdout.write(line1 + '\n');
+  } else if (config.preset === 'essential') {
+    process.stdout.write(line1 + '\n');
+    process.stdout.write(line2 + '\n');
+  } else {
+    process.stdout.write(line1 + '\n');
+    process.stdout.write(line2 + '\n');
+    process.stdout.write(line3 + '\n');
+    process.stdout.write(line4 + '\n');
+  }
 }
