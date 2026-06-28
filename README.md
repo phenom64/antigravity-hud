@@ -1,6 +1,6 @@
 # 🚀 antigravity-hud
 
-> A 4-line statusline HUD for the [Antigravity CLI](https://github.com/google-gemini/antigravity-cli). Because flying blind through your quota is no way to code.
+> A 4-line statusline HUD for the [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli). Because flying blind through your quota is no way to code.
 
 ```
 Claude Opus 4.6 (Thinking) │ my-app git:(main*) │ ⠹ tool_use
@@ -11,9 +11,10 @@ ctx ████████░░░░ 21% (48.2k ↑ / 3.9k ↓ / 250.0k) │
 
 ## The backstory
 
-I burned through my [Claude Code](https://claude.ai) and [ChatGPT Codex](https://chat.openai.com) usage limits in about a week. Classic. Then I rediscovered **Google Antigravity**, Google's agentic coding CLI that ships with Gemini models *and* lets you use third-party models like Claude Opus/Sonnet 4.6 through the same interface.
+Whilst building SynCloudOS I burned through my entire [Claude Code](https://claude.ai) and [ChatGPT Codex](https://chat.openai.com) weekly usage limits in about 48 hours. Classic. Then I rediscovered **Google Antigravity**, Google's agentic coding CLI that ships with Gemini models *and* lets you use third-party models like Claude Opus/Sonnet 4.6 through the same interface. More importantly I realised I have been paying for this and really should use it at least once.
 
 The problem? Antigravity's built-in statusline is... minimal. I wanted something that showed me *everything* at a glance: which model I'm burning tokens on, how much quota I have left, what tools the agent is using, and whether I should maybe switch to Gemini 3.5 Flash for that docs task instead of torching premium Claude tokens.
+I also wanted a *gamified* interface, one that is addictive, almost slot (slop?) machine like and encourages me to waste my 20s vibe coding, à la Claude.
 
 So I built this. First as a [chaotic PowerShell script](legacy/statusline-syn.ps1), then as a proper cross-platform Node.js CLI.
 
@@ -173,16 +174,13 @@ antigravity-hud/
 cat docs/payload-examples/statusline-last.example.json | node bin/antigravity-hud.js
 
 # Test with the example transcript (skips live transcript search)
-AGY_HUD_TRANSCRIPT=docs/payload-examples/transcript.example.jsonl \
-  cat docs/payload-examples/statusline-last.example.json | node bin/antigravity-hud.js
+cat docs/payload-examples/statusline-last.example.json | AGY_HUD_TRANSCRIPT=docs/payload-examples/transcript.example.jsonl node bin/antigravity-hud.js
 
 # Test with no colour
-AGY_HUD_NO_COLOR=1 \
-  cat docs/payload-examples/statusline-last.example.json | node bin/antigravity-hud.js
+cat docs/payload-examples/statusline-last.example.json | AGY_HUD_NO_COLOR=1 node bin/antigravity-hud.js
 
 # Test tiny layout
-AGY_HUD_LAYOUT=tiny \
-  cat docs/payload-examples/statusline-last.example.json | node bin/antigravity-hud.js
+cat docs/payload-examples/statusline-last.example.json | AGY_HUD_LAYOUT=tiny node bin/antigravity-hud.js
 ```
 
 On Windows PowerShell:
@@ -201,7 +199,8 @@ $env:AGY_HUD_TRANSCRIPT=$null
 [MIT](LICENSE). Go wild.
 
 ## Credits
+Designed by Kavish Krishnakumar in Manchester - this project is not a part of Syndromatic Limited, it's personal.
 
-Built with ☕ and mild quota anxiety. Inspired by [Claude Code](https://claude.ai)'s statusline, but for the Antigravity CLI ecosystem.
+Built with ☕, vibes, and mild quota anxiety. Inspired by [Claude HUD](https://github.com/jarrodwatts/claude-hud)'s statusline, but for the Antigravity CLI ecosystem.
 
-If you're reading this, you probably also care about your token budget. Welcome to the club. 🫡
+If you're reading this, you probably also care about your token budget. Welcome to the club.

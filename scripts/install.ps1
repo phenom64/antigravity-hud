@@ -48,12 +48,12 @@ if (Test-Path $settingsFile) {
   try {
     $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
   } catch {
-    Write-Host "  [!] Failed to parse settings.json — creating fresh config" -ForegroundColor Yellow
+    Write-Host "  [!] Failed to parse settings.json - creating fresh config" -ForegroundColor Yellow
     $settings = [pscustomobject]@{}
   }
 } else {
   $settings = [pscustomobject]@{}
-  Write-Host "  [..] No existing settings.json — creating new one" -ForegroundColor Gray
+  Write-Host "  [..] No existing settings.json - creating new one" -ForegroundColor Gray
 }
 
 # ── Patch statusLine ────────────────────────────────────────────────────

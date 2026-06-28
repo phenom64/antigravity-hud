@@ -2,8 +2,8 @@
 'use strict';
 
 // ─── antigravity-hud.js ────────────────────────────────────────────────────────
-// Cross-platform Node.js CLI – reads JSON from stdin, outputs a 4-line ANSI HUD.
-// Zero npm dependencies.  Only Node.js built-ins.
+// Cross-platform Node.js CLI - reads JSON from stdin, outputs a 4-line ANSI HUD.
+// Zero npm dependencies. Only Node.js built-ins.
 // ────────────────────────────────────────────────────────────────────────────────
 
 const fs   = require('fs');
@@ -75,6 +75,12 @@ function quotaColor(pct) {
   if (pct >= 25) return Amber;
   if (pct >= 15) return Orange;
   return Red;
+}
+
+/** Get remaining quota percentage, defaulting to 100 if missing or null. */
+function quotaPct(q) {
+  if (!q || q.remaining_fraction == null) return 100;
+  return Math.round(q.remaining_fraction * 100);
 }
 
 /** Safely get a nested property. */
@@ -182,8 +188,8 @@ const q5hKey = is3p ? '3p-5h'     : 'gemini-5h';
 const qWkKey = is3p ? '3p-weekly' : 'gemini-weekly';
 const q5h    = dig(j, 'quota', q5hKey) || {};
 const qWk    = dig(j, 'quota', qWkKey) || {};
-const q5hPct = Math.round((q5h.remaining_fraction || 0) * 100);
-const qWkPct = Math.round((qWk.remaining_fraction || 0) * 100);
+const q5hPct = quotaPct(q5h);
+const qWkPct = quotaPct(qWk);
 
 // ─── TRANSCRIPT PARSING ───────────────────────────────────────────────────────
 
@@ -251,7 +257,7 @@ const toolLastSeen = {};  // category → sequence number
 let shellCount   = 0;
 let taskCount    = j.task_count || 0;
 let agentInvoked = 0;
-let activeAgents = 0;
+let activeAgents = null;
 let seqNum       = 0;
 
 try {
@@ -287,7 +293,6 @@ try {
           if (toolName === 'run_command') shellCount++;
           if (toolName === 'manage_task' || toolName === 'schedule') taskCount++;
 
-          if (toolName === 'define_subagent') agentInvoked++;
           if (toolName === 'invoke_subagent') {
             // Count Subagents array length if present
             const args = tc.arguments || tc.args || {};
@@ -304,13 +309,15 @@ try {
 shellCount   = Math.min(shellCount, 99);
 taskCount    = Math.min(taskCount, 99);
 agentInvoked = Math.min(agentInvoked, 99);
-activeAgents = Math.min(activeAgents, 99);
+if (activeAgents !== null) {
+  activeAgents = Math.min(activeAgents, 99);
+}
 
 // Agent count priority: j.subagents?.length > activeAgents > agentInvoked > 0
 let agentCount = 0;
 if (Array.isArray(j.subagents) && j.subagents.length > 0) {
   agentCount = j.subagents.length;
-} else if (activeAgents > 0) {
+} else if (activeAgents !== null) {
   agentCount = activeAgents;
 } else {
   agentCount = agentInvoked;
