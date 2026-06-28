@@ -1,7 +1,7 @@
 # Design Spec: Antigravity Tool Permission Mode Reader and Switcher
 
 ## Goal
-Enable `antigravity-hud` to read the active Antigravity Tool Permission mode from `~/.gemini/antigravity-cli/settings.json`, display it with distinct colors/symbols on the HUD, and switch it via new CLI subcommands.
+Enable `antigravity-hud` to read the active Antigravity Tool Permission mode from `~/.gemini/antigravity-cli/settings.json`, display it with distinct layout-dependent formats and colors on the HUD, and switch it via new CLI subcommands.
 
 ## Key Detection & Settings Logic
 1. **Settings Path**: Resolved cross-platform using Node's `os.homedir()`:
@@ -24,7 +24,7 @@ Enable `antigravity-hud` to read the active Antigravity Tool Permission mode fro
 
 ## CLI Subcommands
 - `antigravity-hud mode`
-  Prints current raw permission mode value and its HUD label mapping.
+  Prints current raw permission mode value and its HUD label representation.
 - `antigravity-hud mode next`
   Cycles through the modes:
   `request-review` -> `proceed-in-sandbox` -> `always-proceed` -> `strict` -> `request-review`
@@ -37,24 +37,42 @@ Enable `antigravity-hud` to read the active Antigravity Tool Permission mode fro
 - `antigravity-hud mode strict`
   Sets key to `strict`.
 - `antigravity-hud bind-shift-tab`
-  Document that custom keybindings cannot trigger external commands, and recommend `antigravity-hud mode next`.
+  Document that Shift+Tab is not supported by Antigravity yet because Antigravity keybindings cannot run external commands, and recommend `antigravity-hud mode next`.
 
 ## HUD Visuals (Line 4)
-We will dynamically query the current permission mode and display:
+We will dynamically query the current permission mode and apply the following layout and color mappings.
 
-- **`request-review`**:
-  - Symbol: `⏸` (Pause symbol `\u23F8`, ASCII: `||`)
-  - Label: `review`
-  - Color: Orange (`colorAuto`)
-- **`proceed-in-sandbox`**:
-  - Symbol: `⏩` (Fast forward symbol `\u23E9`, ASCII: `>>`)
-  - Label: `auto mode`
-  - Color: Amber (`colorQuotaMid` / Yellow)
-- **`always-proceed`**:
-  - Symbol: `⏩` (Fast forward symbol `\u23E9`, ASCII: `>>`)
-  - Label: `bypass permissions (YOLO)`
-  - Color: Cyan (`colorActive`)
-- **`strict`**:
-  - Symbol: `🔒` (Lock symbol `\uD83D\uDD12`, ASCII: `L`)
-  - Label: `strict`
-  - Color: Red (`colorQuotaCritical` / Red)
+### Layout Mappings
+- **Normal/Full layout mapping**:
+  - `request-review` -> `[symbol] review` (e.g. `⏸ review`)
+  - `proceed-in-sandbox` -> `[symbol] auto mode` (e.g. `⏩ auto mode`)
+  - `always-proceed` -> `[symbol] bypass permissions (YOLO)` (e.g. `⏩ bypass permissions (YOLO)`)
+  - `strict` -> `[symbol] strict` (e.g. `🔒 strict`)
+- **Compact layout mapping**:
+  - `request-review` -> `[symbol] review` (e.g. `⏸ review`)
+  - `proceed-in-sandbox` -> `[symbol] auto` (e.g. `⏩ auto`)
+  - `always-proceed` -> `[symbol] YOLO` (e.g. `⏩ YOLO`)
+  - `strict` -> `[symbol] strict` (e.g. `🔒 strict`)
+- **Tiny layout mapping (No symbols)**:
+  - `request-review` -> `review`
+  - `proceed-in-sandbox` -> `auto`
+  - `always-proceed` -> `YOLO`
+  - `strict` -> `strict`
+
+### Unicode / NO_UNICODE Symbols
+- **Unicode Enabled**:
+  - Pause symbol: `\u23F8`
+  - Fast forward symbol: `\u23E9` (already defined as `FAST`)
+  - Lock symbol: `\uD83D\uDD12`
+- **NO_UNICODE=1 Fallbacks**:
+  - `request-review` -> `|| review`
+  - `proceed-in-sandbox` -> `>> auto mode` (normal) or `>> auto` (compact)
+  - `always-proceed` -> `>> bypass permissions (YOLO)` (normal) or `>> YOLO` (compact)
+  - `strict` -> `[lock] strict`
+
+### Colors & Config Keys
+We will add support for the following colors in `config.colors` (resolving hex colors dynamic-ready):
+- `permissionReview`: default `#FFD166` (amber/soft yellow)
+- `permissionAuto`: default `#FF8700` (current orange)
+- `permissionBypass`: default `#FF3B8A` (hot pink/danger mode)
+- `permissionStrict`: default `#8EA2FF` (icy blue-grey)
