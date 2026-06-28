@@ -88,21 +88,22 @@ function getExistingPermissionKey(settings) {
 
 function readSettings() {
   if (!fs.existsSync(SETTINGS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+}
+
+function readPermissionMode() {
   try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    const settings = readSettings();
+    const key = getExistingPermissionKey(settings) || 'toolPermission';
+    return settings[key] || 'request-review';
   } catch (_) {
-    return {};
+    return 'request-review';
   }
 }
 
 function writeSettings(settings) {
-  try {
-    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
-  } catch (err) {
-    console.error(`  ${Red}[!] Failed to write settings.json:${R}`, err.message);
-    throw err;
-  }
+  fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
 }
 
 function backupSettings() {
@@ -112,13 +113,8 @@ function backupSettings() {
   const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const backupName = `settings.json.backup-antigravity-hud-${ts}`;
   const backupPath = path.join(SETTINGS_DIR, backupName);
-  try {
-    fs.copyFileSync(SETTINGS_FILE, backupPath);
-    console.log(`  ${Green}[OK] Backed up settings to: ${backupName}${R}`);
-  } catch (err) {
-    console.error(`  ${Red}[!] Failed to backup settings.json:${R}`, err.message);
-    throw err;
-  }
+  fs.copyFileSync(SETTINGS_FILE, backupPath);
+  console.log(`  ${Green}[OK] Backed up settings to: ${backupName}${R}`);
 }
 
 /** Format large numbers: 1.2m, 29.5k, or integer string. */
@@ -482,7 +478,13 @@ if (arg === 'install') {
   runHelp();
 } else if (arg === 'mode') {
   const sub = process.argv[3];
-  const settings = readSettings();
+  let settings;
+  try {
+    settings = readSettings();
+  } catch (err) {
+    console.error(`  ${Red}[!] Failed to read settings.json:${R}`, err.message);
+    process.exit(1);
+  }
   const key = getExistingPermissionKey(settings) || 'toolPermission';
   const val = settings[key] || 'request-review';
 
@@ -1164,11 +1166,7 @@ function runHud(raw) {
     shellText = `\u001b]8;;file://${tUrl}\u0007${shellCount} shell\u001b]8;;\u0007`;
   }
 
-  const permMode = (() => {
-    const settings = readSettings();
-    const key = getExistingPermissionKey(settings) || 'toolPermission';
-    return settings[key] || 'request-review';
-  })();
+  const permMode = readPermissionMode();
 
   let permColor = colorPermReview;
   let permIcon = PAUSE;
@@ -1177,7 +1175,7 @@ function runHud(raw) {
   if (permMode === 'request-review') {
     permColor = colorPermReview;
     permIcon = PAUSE;
-    permText = (layout === 'tiny') ? 'review' : 'review';
+    permText = 'review';
   } else if (permMode === 'proceed-in-sandbox') {
     permColor = colorPermAuto;
     permIcon = FAST;
@@ -1189,7 +1187,7 @@ function runHud(raw) {
   } else if (permMode === 'strict') {
     permColor = colorPermStrict;
     permIcon = LOCK;
-    permText = (layout === 'tiny') ? 'strict' : 'strict';
+    permText = 'strict';
   }
 
   // Determine prefix: in tiny layout, we don't display icons or leading spaces

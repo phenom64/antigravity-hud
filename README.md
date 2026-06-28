@@ -135,7 +135,7 @@ The CLI provides commands to query and modify your tool permission settings in `
 
 ### Tool Permission Mode
 
-The HUD displays your active tool permission mode in the bottom-left corner (for example, `⏩ auto mode auto`). You can query or change this mode using the `mode` subcommand.
+The HUD displays your active tool permission mode in the bottom-left corner (for example, `⏩ auto mode`). You can query or change this mode using the `mode` subcommand.
 
 * **Show current mode:**
   ```bash
@@ -214,7 +214,7 @@ export AGY_HUD_LAYOUT=compact
 Line 1:  Model │ repo git:(branch*) │ ● state
 Line 2:  ctx [████░░░░] 21% (48k ↑ / 4k ↓ / 250k) │ 5h [████░░] 72% 3h │ wk [█████░] 91% 6d │ ~$0.041 │ RAM 54%
 Line 3:  ✔ read ×5 │ ✔ search ×1 │ ✔ edit ×2 │ ✔ bash ×3 │
-Line 4:  ⏩ auto mode auto │ ● 3 shell │ ● 1 tasks │ ● 0 agents
+Line 4:  ⏩ auto mode │ ● 3 shell │ ● 1 tasks │ ● 0 agents
 ```
 
 | Element | Source |
