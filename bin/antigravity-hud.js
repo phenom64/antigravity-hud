@@ -528,7 +528,7 @@ if (arg === 'install') {
   } else if (['review', 'auto', 'yolo', 'strict'].includes(sub)) {
     const targetVal = map[sub];
     if (val === targetVal) {
-      console.log(`  [OK] Permission mode is already set to '${targetVal}'.`);
+      console.log(`  ${Green}[OK] Permission mode is already set to '${targetVal}'.${R}`);
       process.exit(0);
     }
     try {
@@ -617,14 +617,8 @@ function runInstall() {
 
   // Backup if it exists
   if (exists) {
-    const pad = n => String(n).padStart(2, '0');
-    const now = new Date();
-    const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const backupName = `settings.json.backup-antigravity-hud-${ts}`;
-    const backupPath = path.join(settingsDir, backupName);
     try {
-      fs.copyFileSync(settingsFile, backupPath);
-      console.log(`  ${Green}[OK] Backed up settings to: ${backupName}${R}`);
+      backupSettings();
     } catch (err) {
       console.error(`  ${Red}[!] Failed to backup settings.json:${R}`, err.message);
       process.exit(1);
