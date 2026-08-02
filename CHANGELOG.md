@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-03
+
+### Fixed & Enhanced
+- 🔗 Default Terminal Hyperlinks & Git Branch Links:
+  - Enabled OSC 8 terminal hyperlinks out-of-the-box by default (`config.enableLinks`).
+  - Added clickable OSC 8 hyperlink to the git branch name (`git:(master*)`) linking directly to the remote GitHub tree (`https://github.com/owner/repo/tree/branch`) or local folder.
+
 ## [0.4.0] - 2026-08-03
 
 ### Added

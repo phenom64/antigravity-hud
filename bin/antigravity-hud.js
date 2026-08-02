@@ -26,7 +26,7 @@ let config = loadConfig();
 const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1' || config.colorMode === false;
 const NO_UNICODE = process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false;
 const NO_SPINNER = process.env.AGY_HUD_NO_SPINNER === '1';
-const ENABLE_LINKS = process.env.AGY_HUD_LINKS   === '1';
+const ENABLE_LINKS = process.env.AGY_HUD_LINKS === '1' || (process.env.AGY_HUD_LINKS !== '0' && config.enableLinks !== false);
 
 // ─── UNICODE / ASCII GLYPHS ───────────────────────────────────────────────────
 let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
@@ -932,6 +932,7 @@ function runHud(raw) {
   // ─── GIT BRANCH ────────────────────────────────────────────────────────────────
   let branch = '';
   let dirty  = '';
+  let gitRepoUrl = '';
   try {
     branch = execFileSync('git', ['-C', project, 'branch', '--show-current'], {
       timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
@@ -945,6 +946,21 @@ function runHud(raw) {
       }).trim();
       if (status.length > 0) dirty = '*';
     } catch (_) { /* ignore */ }
+
+    try {
+      let rawRemote = execFileSync('git', ['-C', project, 'remote', 'get-url', 'origin'], {
+        timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      if (rawRemote) {
+        rawRemote = rawRemote.replace(/\.git$/, '');
+        if (rawRemote.startsWith('git@')) {
+          rawRemote = rawRemote.replace(/^git@([^:]+):/, 'https://$1/');
+        }
+        if (rawRemote.startsWith('https://') || rawRemote.startsWith('http://')) {
+          gitRepoUrl = `${rawRemote}/tree/${encodeURIComponent(branch)}`;
+        }
+      }
+    } catch (_) { /* no remote origin */ }
   }
 
   // ─── QUOTA LOGIC ───────────────────────────────────────────────────────────────
@@ -1039,10 +1055,23 @@ function runHud(raw) {
 
   // ─── LINE 1: Model │ repo git:(branch*) │ ● state ─────────────────────────────
   const stateColor = isActive ? colorActive : colorSuccess;
+  let branchText = branch ? `${branch}${dirty}` : '';
+  if (ENABLE_LINKS && branch) {
+    let linkUrl = gitRepoUrl;
+    if (!linkUrl) {
+      let projectUrl = project.replace(/\\/g, '/');
+      if (!projectUrl.startsWith('/')) {
+        projectUrl = '/' + projectUrl;
+      }
+      linkUrl = `file://${projectUrl}`;
+    }
+    branchText = `\u001b]8;;${linkUrl}\u0007${branchText}\u001b]8;;\u0007`;
+  }
+
   const branchStr = branch
     ? (layout === 'tiny'
-        ? ` ${colorLabel}(${colorGit}${branch}${dirty}${colorLabel})${R}`
-        : ` ${colorLabel}git:(${colorGit}${branch}${dirty}${colorLabel})${R}`)
+        ? ` ${colorLabel}(${colorGit}${branchText}${colorLabel})${R}`
+        : ` ${colorLabel}git:(${colorGit}${branchText}${colorLabel})${R}`)
     : '';
 
   let repoText = repo;

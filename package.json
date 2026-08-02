@@ -1,6 +1,6 @@
 {
   "name": "@phenom64/antigravity-hud",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI: subagent runtimes, rate limit reset timers, context windows, OSC 8 links, tool tallies, and vibes.",
   "main": "bin/antigravity-hud.js",
   "publishConfig": {
