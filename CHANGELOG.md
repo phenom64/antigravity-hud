@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-03
+
+### Added
+- 🚀 Claude HUD Parity & Telemetry Upgrade:
+  - Active Subagent Runtimes & Jump Links: Live tracking of running subagents, active roles, elapsed runtime (`42s`), and clickable OSC 8 links directly to transcript logs.
+  - Quota Reset Timers: 5-hour and 7-day rate limit gauges with `resets in Xh Ym` countdown timers.
+  - Interactive Terminal Hyperlinks: OSC 8 links enabled for project paths (`file://`), remote git branch trees (`https://github.com/...`), subagent transcript logs, and settings.
+  - Plan / Todo Checklist Tracker: Automatically parses transcript checklists to display `📋 Plan: 3/5 tasks done`.
+  - Dynamic Multi-Model Context Windows: Scales context gauges automatically for 200k (Claude), 1.0M (Gemini Flash), and 2.0M (Gemini Pro) tokens.
+  - Zero-Dependency Modular Architecture: Extracted modular core (`src/config.js`, `src/hyperlinks.js`, `src/quota.js`, `src/transcript.js`, `src/render/lines.js`).
+
 ## [0.3.2] - 2026-06-28
 
 ### Added

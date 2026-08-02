@@ -1,7 +1,7 @@
 {
   "name": "@phenom64/antigravity-hud",
-  "version": "0.3.2",
-  "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI: quota bars, context windows, tool tallies, and vibes.",
+  "version": "0.4.0",
+  "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI: subagent runtimes, rate limit reset timers, context windows, OSC 8 links, tool tallies, and vibes.",
   "main": "bin/antigravity-hud.js",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
@@ -10,7 +10,7 @@
     "antigravity-hud": "bin/antigravity-hud.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/test-hyperlinks.js && node tests/test-parser.js && node tests/test-render.js && node tests/test-integration.js"
   },
   "keywords": [
     "antigravity",
@@ -32,6 +32,8 @@
   },
   "files": [
     "bin/",
+    "src/",
+    "tests/",
     "legacy/",
     "scripts/",
     "docs/",

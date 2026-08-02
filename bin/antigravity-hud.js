@@ -12,23 +12,15 @@ const os   = require('os');
 const readline = require('readline');
 const { execFileSync } = require('child_process');
 
+// ─── MODULAR SRC IMPORTS ───────────────────────────────────────────────────────
+const { loadConfig } = require('../src/config');
+const { makeLink } = require('../src/hyperlinks');
+const { parseTranscript } = require('../src/transcript');
+const { formatResetTime, getContextCapacity } = require('../src/quota');
+const { renderHUD } = require('../src/render/lines');
+
 // ─── CONFIGURATION LOADING ─────────────────────────────────────────────────────
-const configPath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-config.json');
-let config = {
-  preset: 'full',
-  showCost: true,
-  showSpeed: true,
-  showMemory: false,
-  colorMode: true,
-  unicodeMode: true,
-  colors: {}
-};
-try {
-  if (fs.existsSync(configPath)) {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    config = Object.assign(config, parsed);
-  }
-} catch (_) {}
+let config = loadConfig();
 
 // ─── ENV FLAGS ─────────────────────────────────────────────────────────────────
 const NO_COLOR   = process.env.AGY_HUD_NO_COLOR   === '1' || config.colorMode === false;
@@ -649,8 +641,8 @@ function runInstall() {
 }
 
 function runDoctor() {
-  console.log(`\n  ${B}${Cyan}antigravity-hud doctor${R}`);
-  console.log(`  ${Gray}======================${R}\n`);
+  console.log(`\n  ${B}${Cyan}Antigravity HUD Diagnostics (Doctor)${R}`);
+  console.log(`  ${Gray}===================================${R}\n`);
 
   const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
   const settingsFile = path.join(settingsDir, 'settings.json');
