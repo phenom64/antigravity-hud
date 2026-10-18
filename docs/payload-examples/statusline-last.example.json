@@ -43,6 +43,11 @@
       "reset_time": "2026-06-28T12:00:00Z",
       "reset_in_seconds": 10800
     },
+    "gemini-argon-wtu-weekly": {
+      "remaining_fraction": 0.11,
+      "reset_time": "2026-07-05T00:00:00Z",
+      "reset_in_seconds": 584397
+    },
     "gemini-weekly": {
       "remaining_fraction": 0.97,
       "reset_time": "2026-07-05T00:00:00Z",

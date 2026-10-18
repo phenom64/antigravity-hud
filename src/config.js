@@ -9,7 +9,6 @@ const DEFAULT_CONFIG = {
   preset: 'full',
   showCost: true,
   showSpeed: true,
-  showMemory: false,
   showSkills: true,
   showMcp: true,
   showSubagents: true,

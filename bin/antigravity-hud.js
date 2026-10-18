@@ -16,7 +16,7 @@ const { execFileSync } = require('child_process');
 const { loadConfig } = require('../src/config');
 const { makeLink } = require('../src/hyperlinks');
 const { parseTranscript } = require('../src/transcript');
-const { formatResetTime, getContextCapacity } = require('../src/quota');
+const { formatResetTime, getContextCapacity, resolveQuotaSegments, quotaPct } = require('../src/quota');
 const { renderHUD } = require('../src/render/lines');
 
 // ─── CONFIGURATION LOADING ─────────────────────────────────────────────────────
@@ -144,15 +144,6 @@ function quotaColor(pct) {
   return colorQuotaCritical;
 }
 
-/** Get remaining quota percentage, defaulting to 100 if missing or null. */
-function quotaPct(q) {
-  if (!q || q.remaining_fraction == null) return 100;
-
-  const pct = Math.round(Number(q.remaining_fraction) * 100);
-  if (!Number.isFinite(pct)) return 100;
-
-  return Math.max(0, Math.min(100, pct));
-}
 
 const ANSI_BY_NAME = {
   dim: '\x1b[2m',
@@ -206,19 +197,6 @@ const colorPermAuto   = resolveColor(config.colors.permissionAuto,   `${Orange}`
 const colorPermBypass = resolveColor(config.colors.permissionBypass, '#FF3B8A');
 const colorPermStrict = resolveColor(config.colors.permissionStrict, '#8EA2FF');
 
-function getRamUsage() {
-  try {
-    const total = os.totalmem();
-    const free = os.freemem();
-    const used = total - free;
-    const pct = Math.round((used / total) * 100);
-    const gb = bytes => (bytes / (1024 * 1024 * 1024)).toFixed(1);
-    return { pct, used: gb(used), total: gb(total) };
-  } catch (_) {
-    return { pct: 0, used: '0.0', total: '0.0' };
-  }
-}
-
 /**
  * Model pricing rates in USD per million tokens.
  * NOTE: This is an API-equivalent estimate only and may be stale.
@@ -228,6 +206,8 @@ const MODEL_PRICING = {
   'opus': { input: 15.0, output: 75.0 },
   'sonnet': { input: 3.0, output: 15.0 },
   'haiku': { input: 0.8, output: 4.0 },
+  'argon': { input: 1.25, output: 5.0 },
+  'gemini-4-argon': { input: 1.25, output: 5.0 },
   'gemini-1.5-pro': { input: 1.25, output: 5.0 },
   'gemini-1.5-flash': { input: 0.075, output: 0.3 },
   'gemini-2.0-flash': { input: 0.075, output: 0.3 },
@@ -819,17 +799,12 @@ async function runConfigure() {
   const speedAns = await askQuestion(`  Enable token generation speed (tok/s)? (y/n) [current: ${curSpeed}]: `);
   const showSpeed = speedAns ? (speedAns.toLowerCase() === 'y') : (current.showSpeed !== false);
 
-  // 4. Memory
-  const curMemory = current.showMemory === true ? 'y' : 'n';
-  const memoryAns = await askQuestion(`  Enable system RAM monitoring? (y/n) [current: ${curMemory}]: `);
-  const showMemory = memoryAns ? (memoryAns.toLowerCase() === 'y') : (current.showMemory === true);
-
-  // 5. Colors
+  // 4. Colors
   const curColor = current.colorMode !== false ? 'y' : 'n';
   const colorAns = await askQuestion(`  Enable ANSI colors? (y/n) [current: ${curColor}]: `);
   const colorMode = colorAns ? (colorAns.toLowerCase() === 'y') : (current.colorMode !== false);
 
-  // 6. Unicode
+  // 5. Unicode
   const curUnicode = current.unicodeMode !== false ? 'y' : 'n';
   const unicodeAns = await askQuestion(`  Use Unicode glyphs (reverts to ASCII if disabled)? (y/n) [current: ${curUnicode}]: `);
   const unicodeMode = unicodeAns ? (unicodeAns.toLowerCase() === 'y') : (current.unicodeMode !== false);
@@ -838,7 +813,6 @@ async function runConfigure() {
     preset,
     showCost,
     showSpeed,
-    showMemory,
     colorMode,
     unicodeMode,
     colors: current.colors || {}
@@ -891,11 +865,10 @@ function runHud(raw) {
   const ctxSize  = dig(j, 'context_window', 'context_window_size') || 1;
   const ctxPct   = dig(j, 'context_window', 'used_percentage')     || 0;
 
-  // ─── CALCULATE COST, SPEED, RAM ────────────────────────────────────────────────
+  // ─── CALCULATE COST, SPEED ─────────────────────────────────────────────────────
   const totalCost   = estimateCost(model, ctxIn, ctxOut);
   const cachePath   = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'speed-cache.json');
   const streamSpeed = getSpeed(ctxOut, cachePath);
-  const ram         = getRamUsage();
 
   // ─── LAYOUT ────────────────────────────────────────────────────────────────────
   let layout = cols >= 118 ? 'normal' : cols >= 92 ? 'compact' : 'tiny';
@@ -964,13 +937,7 @@ function runHud(raw) {
   }
 
   // ─── QUOTA LOGIC ───────────────────────────────────────────────────────────────
-  const is3p   = /claude|opus|sonnet/i.test(model);
-  const q5hKey = is3p ? '3p-5h'     : 'gemini-5h';
-  const qWkKey = is3p ? '3p-weekly' : 'gemini-weekly';
-  const q5h    = dig(j, 'quota', q5hKey) || {};
-  const qWk    = dig(j, 'quota', qWkKey) || {};
-  const q5hPct = quotaPct(q5h);
-  const qWkPct = quotaPct(qWk);
+  const quotaSegments = resolveQuotaSegments(j);
 
   // ─── TRANSCRIPT PARSING ───────────────────────────────────────────────────────
   const toolCounts   = {};  // category → count
@@ -1090,12 +1057,11 @@ function runHud(raw) {
     `${stateColor}${B}${stateGlyph}${R} ${stateColor}${B}${state}${R}`
   ];
 
-  // Append Cost, Speed, RAM if minimal or essential
+  // Append Cost, Speed if minimal or essential
   if (config.preset === 'minimal' || config.preset === 'essential') {
     const extras = [];
     if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
     if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
-    if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
     if (extras.length > 0) {
       line1Parts.push(extras.join(` ${colorSep}${SEP}${R} `));
     }
@@ -1131,16 +1097,16 @@ function runHud(raw) {
       + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`;
   }
 
-  const seg5h = quotaSegment('5h', q5hPct, q5h.reset_in_seconds, barLen);
-  const segWk = quotaSegment('wk', qWkPct, qWk.reset_in_seconds, barLen);
+  const quotaParts = quotaSegments.map(seg =>
+    quotaSegment(seg.label, seg.pct, seg.resetSeconds, barLen)
+  );
 
-  const line2Parts = [ctxLabel, seg5h, segWk];
-  // Append Cost, Speed, RAM if full preset
+  const line2Parts = [ctxLabel, ...quotaParts];
+  // Append Cost, Speed if full preset
   if (config.preset === 'full') {
     const extras = [];
     if (config.showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
     if (config.showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
-    if (config.showMemory) extras.push(`${colorModel}RAM ${ram.pct}%${R}`);
     if (extras.length > 0) {
       line2Parts.push(extras.join(` ${colorSep}${SEP}${R} `));
     }
