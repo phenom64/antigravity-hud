@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-19
+
+### Added
+- ⚡ Gemini 4 Argon Pro Quota Support:
+  - Added dedicated support for Gemini 4 Argon (`gemini-4-argon`) weekly quota limits (`gemini-argon-wtu-weekly`) for Google AI Pro subscribers.
+  - Dynamically displays a dedicated `argon-wk` progress bar, percentage, and reset countdown on Line 2 when active on a Pro plan with an Argon model.
+  - Suppresses standard 5-hour quota (`5h`) display when Argon Pro weekly limit is active.
+  - Retains dual `5h` and `wk` quota bars for standard Gemini, non-Pro Argon tiers, and third-party models (Claude / GPT).
+  - Configured 1,000,000 token context window fallback capacity for Argon models.
+  - Added token pricing estimate for Gemini 4 Argon in `MODEL_PRICING`.
+
+### Changed & Removed
+- 🧹 Streamlined Statusline Metrics:
+  - Removed RAM percentage monitoring and polling from HUD display across all presets to reduce overhead and simplify Line 2 output.
+  - Removed `showMemory` option from configuration wizard and default configuration.
+
 ## [0.4.1] - 2026-08-03
 
 ### Fixed & Enhanced
