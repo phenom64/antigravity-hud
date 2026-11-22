@@ -289,11 +289,11 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
           const args = tc.arguments || tc.args || {};
           const rawPath = cleanArgString(args.Path || args.AbsolutePath || '');
           if (rawPath) {
-            const skillMatch = rawPath.match(/[\\/]skills[\\/]([^\\/]+)[\\/]SKILL\.md$/i);
+            const skillMatch = rawPath.match(/[\\/]+skills[\\/]+([^\\/]+)[\\/]+SKILL\.md$/i);
             if (skillMatch && skillMatch[1]) {
               skillsSet.add(skillMatch[1]);
             }
-            const mcpMatch = rawPath.match(/[\\/]mcp[\\/]([^\\/]+)[\\/]/i);
+            const mcpMatch = rawPath.match(/[\\/]+mcp[\\/]+([^\\/]+)[\\/]+/i);
             if (mcpMatch && mcpMatch[1]) {
               mcpSet.add(mcpMatch[1]);
             }

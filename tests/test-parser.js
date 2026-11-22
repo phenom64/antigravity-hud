@@ -7,6 +7,7 @@ const {
   formatDuration,
   getContextCapacity,
   resolveQuotaSegments,
+  resolveResetSeconds,
   quotaPct,
   estimateCost
 } = require('../src/quota');
@@ -49,10 +50,13 @@ assert.strictEqual(estimateCost('Gemini 4 Hydrogen (Low)', 1000000, 0, 0), 0.15)
 // 800k cached (at 25% of 1.25 = 0.25) + 200k uncached (0.25) = 0.50
 assert.strictEqual(Number(estimateCost('Gemini 4 Argon', 1000000, 0, 800000).toFixed(4)), 0.5);
 
-// Quota percentage helper
+// Quota percentage helper & live reset_time wall-clock countdown
 assert.strictEqual(quotaPct({ remaining_fraction: 0.85 }), 85);
 assert.strictEqual(quotaPct({ remaining_fraction: 0 }), 0);
 assert.strictEqual(quotaPct(null), 100);
+const fixedNow = Date.parse('2026-11-22T12:00:00Z');
+assert.strictEqual(resolveResetSeconds({ reset_time: '2026-11-22T13:00:00Z', reset_in_seconds: 99999 }, fixedNow), 3600);
+assert.strictEqual(quotaPct({ remaining_fraction: 0.12, reset_time: '2026-11-22T11:59:00Z' }, fixedNow), 100);
 
 // Test 1: Gemini 4 Argon on Pro plan -> ONLY argon-wk segment when 5h is healthy
 const argonProPayload = {

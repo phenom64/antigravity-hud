@@ -116,20 +116,29 @@ assert.ok(yoloLines[1].includes('argon-wk'));
 assert.ok(!yoloLines[1].includes(' 5h ')); // 5h quota suppressed when >= 25%
 assert.ok(yoloLines[3].includes('\u23E9 bypass permissions (YOLO)'));
 
+// 2e. strict -> "■ strict mode on" (\u25A0)
+const strictLines = renderHUD(
+  { model: 'Gemini 4 Argon (High)' },
+  { preset: 'full' },
+  {},
+  { permissionMode: 'strict' }
+);
+assert.ok(strictLines[3].includes('\u25A0 strict mode on'));
+
 // Test 3: Context bar color gradient (Green <50%, Yellow >=50%, Orange >=70%, Red >=85%)
 const ctx88 = renderHUD(
   { model: 'Gemini 4 Argon', context_window: { used_percentage: 88, total_input_tokens: 880000, context_window_size: 1000000 } },
   { preset: 'essential' },
   {}
 );
-assert.ok(ctx88[1].includes('ctx \x1b[91m')); // Red critical context bar at 88%
+assert.ok(ctx88[1].includes('ctx\x1b[0m \x1b[91m')); // Red critical context bar at 88%
 
 const ctx55 = renderHUD(
   { model: 'Gemini 4 Argon', context_window: { used_percentage: 55, total_input_tokens: 550000, context_window_size: 1000000 } },
   { preset: 'essential' },
   {}
 );
-assert.ok(ctx55[1].includes('ctx \x1b[93m')); // Yellow mid context bar at 55%
+assert.ok(ctx55[1].includes('ctx\x1b[0m \x1b[93m')); // Yellow mid context bar at 55%
 
 // Test 4: Minimal & Essential presets + Tiny layout shortening for Gemini 4 family
 const tinyLines = renderHUD(

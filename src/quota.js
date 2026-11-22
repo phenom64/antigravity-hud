@@ -52,9 +52,38 @@ function getContextCapacity(modelName) {
   return 200000; // Claude / 3P default
 }
 
-/** Get remaining quota percentage, defaulting to 100 if missing or null. */
-function quotaPct(q) {
+/**
+ * Compute live remaining reset seconds from `q.reset_time` (ISO timestamp) when available,
+ * falling back to `q.reset_in_seconds`.
+ */
+function resolveResetSeconds(q, nowMs = Date.now()) {
+  if (!q || typeof q !== 'object') return 0;
+  if (q.reset_time) {
+    const resetMs = Date.parse(q.reset_time);
+    if (Number.isFinite(resetMs)) {
+      const diffSec = Math.floor((resetMs - nowMs) / 1000);
+      return Math.max(0, diffSec);
+    }
+  }
+  if (q.reset_in_seconds != null && Number.isFinite(Number(q.reset_in_seconds))) {
+    return Math.max(0, Math.floor(Number(q.reset_in_seconds)));
+  }
+  return 0;
+}
+
+/**
+ * Get remaining quota percentage, defaulting to 100 if missing or null.
+ * If `q.reset_time` is in the past (window already reset while CLI quota cache was stale),
+ * returns 100.
+ */
+function quotaPct(q, nowMs = Date.now()) {
   if (!q || q.remaining_fraction == null) return 100;
+  if (q.reset_time) {
+    const resetMs = Date.parse(q.reset_time);
+    if (Number.isFinite(resetMs) && nowMs >= resetMs) {
+      return 100;
+    }
+  }
   const pct = Math.round(Number(q.remaining_fraction) * 100);
   if (!Number.isFinite(pct)) return 100;
   return Math.max(0, Math.min(100, pct));
@@ -124,7 +153,7 @@ function estimateCost(modelName, inTokens, outTokens, cacheReadTokens = 0) {
  * - 3P models (Claude/GPT/o-series): '5h' (from 3p-5h) and 'wk' (from 3p-weekly)
  * - Regular Gemini models (including Neon/Carbon/Hydrogen or non-Pro Argon): '5h' (from gemini-5h) and 'wk' (from gemini-weekly)
  */
-function resolveQuotaSegments(payload) {
+function resolveQuotaSegments(payload, nowMs = Date.now()) {
   if (!payload || typeof payload !== 'object') {
     return [
       { id: '5h', label: '5h', quota: {}, pct: 100, resetSeconds: 0 },
@@ -156,19 +185,19 @@ function resolveQuotaSegments(payload) {
         id: 'argon-wk',
         label: 'argon-wk',
         quota: qArgon,
-        pct: quotaPct(qArgon),
-        resetSeconds: qArgon.reset_in_seconds
+        pct: quotaPct(qArgon, nowMs),
+        resetSeconds: resolveResetSeconds(qArgon, nowMs)
       }
     ];
 
     const q5h = quota['gemini-5h'];
-    if (q5h && q5h.remaining_fraction != null && quotaPct(q5h) < 25) {
+    if (q5h && q5h.remaining_fraction != null && quotaPct(q5h, nowMs) < 25) {
       segments.push({
         id: '5h',
         label: '5h',
         quota: q5h,
-        pct: quotaPct(q5h),
-        resetSeconds: q5h.reset_in_seconds
+        pct: quotaPct(q5h, nowMs),
+        resetSeconds: resolveResetSeconds(q5h, nowMs)
       });
     }
 
@@ -183,15 +212,15 @@ function resolveQuotaSegments(payload) {
         id: '5h',
         label: '5h',
         quota: q5h,
-        pct: quotaPct(q5h),
-        resetSeconds: q5h.reset_in_seconds
+        pct: quotaPct(q5h, nowMs),
+        resetSeconds: resolveResetSeconds(q5h, nowMs)
       },
       {
         id: 'wk',
         label: 'wk',
         quota: qWk,
-        pct: quotaPct(qWk),
-        resetSeconds: qWk.reset_in_seconds
+        pct: quotaPct(qWk, nowMs),
+        resetSeconds: resolveResetSeconds(qWk, nowMs)
       }
     ];
   }
@@ -203,15 +232,15 @@ function resolveQuotaSegments(payload) {
       id: '5h',
       label: '5h',
       quota: q5h,
-      pct: quotaPct(q5h),
-      resetSeconds: q5h.reset_in_seconds
+      pct: quotaPct(q5h, nowMs),
+      resetSeconds: resolveResetSeconds(q5h, nowMs)
     },
     {
       id: 'wk',
       label: 'wk',
       quota: qWk,
-      pct: quotaPct(qWk),
-      resetSeconds: qWk.reset_in_seconds
+      pct: quotaPct(qWk, nowMs),
+      resetSeconds: resolveResetSeconds(qWk, nowMs)
     }
   ];
 }
@@ -221,6 +250,7 @@ module.exports = {
   formatDuration,
   getContextCapacity,
   quotaPct,
+  resolveResetSeconds,
   resolveQuotaSegments,
   MODEL_PRICING,
   estimateCost

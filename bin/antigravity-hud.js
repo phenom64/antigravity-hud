@@ -145,7 +145,7 @@ if (arg === 'install') {
     if (modeVal === 'accept-edits') return '⏵⏵ accept edits on';
     if (modeVal === 'plan') return '⏸ plan mode on';
     if (modeVal === 'always-proceed') return '⏩ bypass permissions (YOLO)';
-    if (modeVal === 'strict') return '🔒 strict mode on';
+    if (modeVal === 'strict') return '■ strict mode on';
     return modeVal;
   };
 

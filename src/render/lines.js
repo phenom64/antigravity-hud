@@ -118,14 +118,14 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
   let FAST = '\u23E9', PLAY_DOUBLE = '\u23F5\u23F5', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
   let FULL = '\u2588', EMPTY = '\u2591';
-  let PAUSE = '\u23F8', LOCK = '\uD83D\uDD12';
+  let PAUSE = '\u23F8', STOP = '\u25A0';
   let SPINNER_FRAMES = ['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'];
 
   if (noUnicode) {
     SEP = '|'; DOT = '*'; UP = '^'; DOWN = 'v';
     FAST = '>>'; PLAY_DOUBLE = '>>'; WARN = '!'; CHECK = '+'; TIMES = 'x';
     FULL = '#'; EMPTY = '.';
-    PAUSE = '||'; LOCK = '[lock]';
+    PAUSE = '||'; STOP = '[]';
     SPINNER_FRAMES = ['|', '/', '-', '\\'];
   }
 
@@ -416,7 +416,7 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     permText = (layout === 'tiny' || layout === 'compact') ? 'YOLO' : 'bypass permissions (YOLO)';
   } else if (permMode === 'strict') {
     permColor = colorPermStrict;
-    permIcon = LOCK;
+    permIcon = STOP;
     permText = (layout === 'tiny' || layout === 'compact') ? 'strict on' : 'strict mode on';
   }
 

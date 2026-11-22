@@ -5,57 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.2] - 2026-11-22
+## [0.5.3] - 2026-11-22
 
-### Added & Fixed
-- 🎛️ **Full `Shift+Tab` Cycle Mode Support**:
-  - Added dedicated styling and detection for all 4 Antigravity CLI `Shift+Tab` cycle states:
-    - **`accept-edits`**: `⏵⏵ accept edits on` in light purple (`#C4A7FF`).
-    - **`plan`**: `⏸ plan mode on` in teal (`#2DD4BF`).
-    - **`auto`**: `⏩ auto mode on` in orange.
-    - **`""` (default / fallback)**: Reads `settings.json` (`⏩ bypass permissions (YOLO)`, `⏸ review mode on`, or `🔒 strict mode on`).
-- 🎨 **Context Window Color Gradient (`claude-hud` Parity)**:
-  - Context progress bar now transitions dynamically from green (`<50%`) → yellow (`≥50%`) → orange (`≥70%`) → red (`≥85%`) as the context window fills up.
-- 🌿 **Git Ahead / Behind Upstream Counters**:
-  - Parses `[ahead N, behind M]` from `git status --porcelain -b` and displays `↑N` / `↓M` inside `git:(branch* ↑N ↓M)`.
-- ⚡ **Live Subagent Runtimes, Plan Checklists, Skills/MCP Counters & Session Duration**:
-  - Displays active subagent role and elapsed runtime (`1 agents (Codebase Researcher 42s)`), checklist progress (`3/5 plan`), active skill count (`2 skills`), MCP server count (`1 mcp`), and total session duration (`14m 20s`) on Line 4.
-- 🧪 **Full Gemini 4 Element Family & Claude 5.5 Support**:
-  - Added context capacity (1M tokens), pricing, and `tiny` layout shortening (`(XH)`, `(Orch)`) for `Gemini 4 Neon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Gemini 4 Argon`, and `Claude Opus/Sonnet 5.5`.
-
-## [0.5.1] - 2026-11-22
-
-### Fixed & Improved
-- 🐛 **Conversation-Scoped Transcript & Speed Cache**:
-  - Fixed `resolveTranscript()` in `src/transcript.js` where `antigravity-hud-state.json` permanently pinned the HUD to an older conversation's `transcript.jsonl` across new CLI sessions.
-  - Added automatic path resolution for Antigravity CLI v1.5+ payloads where `transcript_path` points to `.gemini/antigravity/brain/<id>` while the CLI stores logs under `.gemini/antigravity-cli/brain/<id>`.
-  - Scoped `speed-cache.json` by `conversationId` so switching conversations resets `tok/s` velocity cleanly without cross-session delta spikes.
-- ⚡ **Git Status & Remote TTL Caching (`src/git.js`)**:
-  - Combined `git branch` and `git status` into a single `git status --porcelain -b` call cached with a 5-second TTL (and 60-second TTL for `git remote get-url origin`), eliminating 3 synchronous `git` process spawns per render tick.
-- 🔄 **Antigravity CLI v1.5.14 Payload, Tools & Telemetry**:
-  - Added live `cycle_mode` payload resolution (`auto`, `review`, `yolo`, `strict`), `tool_confirmation_pending` alert badge (`⚠ confirm`), and `sandbox.enabled` indicator (`sandbox`).
-  - Added tool categorisation for `swarm` (`agent`) and `run_workflow` (`task`).
-  - Added `gemini-3.8-flash`, `gemini-3.0-pro`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-5`, `o3`, and `o4` to `MODEL_PRICING`, with a 75% prompt-cache discount for `cache_read_input_tokens`.
-  - Expanded 3P quota detection to include `haiku`, `o1`, `o3`, and `o4` models, and added an automatic secondary `5h` warning bar on Gemini 4 Argon Pro when `gemini-5h` drops below 25%.
-- 🏗️ **Unified Modular Architecture & DX Polish**:
-  - Unified `bin/antigravity-hud.js` and `src/` (`src/render/lines.js`, `src/transcript.js`, `src/quota.js`, `src/hyperlinks.js`, `src/git.js`) so the CLI and unit test suite exercise the exact same production renderer.
-  - Preserved all config keys in `antigravity-hud configure`, added an interactive toggle for OSC 8 terminal hyperlinks, and capped `settings.json` backups to the 5 most recent files.
-
-## [0.5.0] - 2026-10-19
+*Cumulative release notes from `0.4.1` to `0.5.3`.*
 
 ### Added
-- ⚡ Gemini 4 Argon Pro Quota Support:
-  - Added dedicated support for Gemini 4 Argon (`gemini-4-argon`) weekly quota limits (`gemini-argon-wtu-weekly`) for Google AI Pro subscribers.
-  - Dynamically displays a dedicated `argon-wk` progress bar, percentage, and reset countdown on Line 2 when active on a Pro plan with an Argon model.
-  - Suppresses standard 5-hour quota (`5h`) display when Argon Pro weekly limit is active.
-  - Retains dual `5h` and `wk` quota bars for standard Gemini, non-Pro Argon tiers, and third-party models (Claude / GPT).
-  - Configured 1,000,000 token context window fallback capacity for Argon models.
-  - Added token pricing estimate for Gemini 4 Argon in `MODEL_PRICING`.
+- **Gemini 4 Family & Claude 5.5 Support**:
+  - Added 1,000,000-token context capacities, API-equivalent pricing estimates (with 75% prompt-cache read discounting for `cache_read_input_tokens`), and `tiny` layout effort shortening (`(XH)`, `(Orch)`, `(H)`, `(M)`, `(L)`, `(T)`) for `Gemini 4 Neon`, `Gemini 4 Argon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Gemini 3.8 Flash`, `Claude Opus 5.5`, `Claude Sonnet 5.5`, and `GPT-5` / `o3` / `o4`.
+- **Gemini 4 Argon Pro Weekly Quota (`argon-wk`)**:
+  - Added dedicated support for `gemini-argon-wtu-weekly` on Google AI Pro plans (`argon-wk` progress bar, percentage, and reset timer on Line 2).
+  - Suppresses the standard 5-hour (`5h`) bar on Argon Pro when healthy, and surfaces `5h` as a secondary warning bar if `gemini-5h` drops below 25%.
+- **Live Wall-Clock Quota Reset Countdowns**:
+  - `resolveResetSeconds()` and `quotaPct()` in `src/quota.js` now compute remaining time dynamically from `reset_time` ISO timestamps rather than static `reset_in_seconds` snapshots, and reset the gauge to `100%` once `reset_time` passes in wall-clock time.
+- **Full `Shift+Tab` Cycle Mode Support & Media-Player Glyph Aesthetic**:
+  - Reads live `cycle_mode` from the Antigravity CLI statusline payload across all four `Shift+Tab` states:
+    - `auto`: `⏩ auto mode on` (orange)
+    - `accept-edits`: `⏵⏵ accept edits on` (light purple `#C4A7FF`)
+    - `plan`: `⏸ plan mode on` (teal `#2DD4BF`)
+    - Default / `settings.json` fallback: `⏩ bypass permissions (YOLO)` (hot pink `#FF3B8A`), `⏸ review mode on` (amber `#FFD166`), and `■ strict mode on` (icy blue-grey `#8EA2FF` with media-player stop glyph `■`).
+- **`claude-hud` Parity Telemetry**:
+  - **Context Bar Color Gradient**: Context window progress bar shifts from green (`<50%`) to yellow (`>=50%`), orange (`>=70%`), and red (`>=85%`).
+  - **Git Ahead / Behind Counters**: Parses `[ahead N, behind M]` from `git status --porcelain -b` and renders `↑N` and `↓M` inside `git:(branch* ↑N ↓M)`.
+  - **Subagent Runtimes, Plan Checklists, Skills/MCP Counters & Session Duration**: Line 4 renders active subagent role and elapsed runtime (`1 agents (Codebase Researcher 42s)`), markdown checklist progress (`3/5 plan`), active skills (`2 skills`), MCP servers (`1 mcp`), tool confirmation alerts (`⚠ confirm` on Line 1), sandbox badge (`sandbox`), and total session duration (`14m 20s`).
 
-### Changed & Removed
-- 🧹 Streamlined Statusline Metrics:
-  - Removed RAM percentage monitoring and polling from HUD display across all presets to reduce overhead and simplify Line 2 output.
-  - Removed `showMemory` option from configuration wizard and default configuration.
+### Fixed & Changed
+- **Conversation-Scoped Transcript & Speed Caches (`src/transcript.js`)**:
+  - Fixed a bug in `resolveTranscript()` where `antigravity-hud-state.json` remained pinned to an older conversation's `transcript.jsonl` across new CLI sessions.
+  - Added path resolution for Antigravity CLI v1.5+ payloads where `transcript_path` points to `.gemini/antigravity/brain/<id>` while the CLI writes logs to `.gemini/antigravity-cli/brain/<id>`.
+  - Scoped `speed-cache.json` by `conversationId` so switching conversations resets `tok/s` velocity without cross-session delta spikes.
+- **Git Status & Remote TTL Caching (`src/git.js`)**:
+  - Combined branch, dirty state, and ahead/behind detection into a single `git status --porcelain -b` call cached with a 5-second TTL (and 60-second TTL for `git remote get-url origin`), eliminating 3 synchronous `git` spawns per render tick.
+- **Unified Modular Architecture & Config Hygiene**:
+  - Unified `bin/antigravity-hud.js` and `src/` (`src/render/lines.js`, `src/transcript.js`, `src/quota.js`, `src/hyperlinks.js`, `src/git.js`) so the CLI and unit tests exercise the same production renderer.
+  - Removed RAM percentage polling and `showMemory` from the HUD and configuration wizard.
+  - Updated `antigravity-hud configure` to preserve all config keys and added a toggle for OSC 8 terminal hyperlinks.
+  - Capped `settings.json` backup files to the 5 most recent backups.
 
 ## [0.4.1] - 2026-08-03
 
@@ -127,7 +111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-06-28
 
 ### Added
-
 - 🎉 Proper one-shot CLI setup flow with subcommands:
   - `antigravity-hud install` - Patches settings.json and creates a timestamped backup of the previous configuration
   - `antigravity-hud doctor` - Diagnostics tool that prints OS, Node version, settings status, and runs a sample payload render test
@@ -142,7 +125,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-06-28
 
 ### Added
-
 - 🎉 Initial release
 - Cross-platform Node.js CLI (`bin/antigravity-hud.js`), zero npm dependencies
 - Legacy PowerShell prototype preserved in `legacy/`
