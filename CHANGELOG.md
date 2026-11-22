@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-11-22
+
+### Added & Fixed
+- 🎛️ **Full `Shift+Tab` Cycle Mode Support**:
+  - Added dedicated styling and detection for all 4 Antigravity CLI `Shift+Tab` cycle states:
+    - **`accept-edits`**: `⏵⏵ accept edits on` in light purple (`#C4A7FF`).
+    - **`plan`**: `⏸ plan mode on` in teal (`#2DD4BF`).
+    - **`auto`**: `⏩ auto mode on` in orange.
+    - **`""` (default / fallback)**: Reads `settings.json` (`⏩ bypass permissions (YOLO)`, `⏸ review mode on`, or `🔒 strict mode on`).
+- 🎨 **Context Window Color Gradient (`claude-hud` Parity)**:
+  - Context progress bar now transitions dynamically from green (`<50%`) → yellow (`≥50%`) → orange (`≥70%`) → red (`≥85%`) as the context window fills up.
+- 🌿 **Git Ahead / Behind Upstream Counters**:
+  - Parses `[ahead N, behind M]` from `git status --porcelain -b` and displays `↑N` / `↓M` inside `git:(branch* ↑N ↓M)`.
+- ⚡ **Live Subagent Runtimes, Plan Checklists, Skills/MCP Counters & Session Duration**:
+  - Displays active subagent role and elapsed runtime (`1 agents (Codebase Researcher 42s)`), checklist progress (`3/5 plan`), active skill count (`2 skills`), MCP server count (`1 mcp`), and total session duration (`14m 20s`) on Line 4.
+- 🧪 **Full Gemini 4 Element Family & Claude 5.5 Support**:
+  - Added context capacity (1M tokens), pricing, and `tiny` layout shortening (`(XH)`, `(Orch)`) for `Gemini 4 Neon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Gemini 4 Argon`, and `Claude Opus/Sonnet 5.5`.
+
 ## [0.5.1] - 2026-11-22
 
 ### Fixed & Improved

@@ -1,6 +1,6 @@
 'use strict';
 const { makeLink, toFileUrl } = require('../hyperlinks');
-const { formatResetTime, getContextCapacity, resolveQuotaSegments, estimateCost } = require('../quota');
+const { formatResetTime, formatDuration, getContextCapacity, resolveQuotaSegments, estimateCost } = require('../quota');
 
 const ANSI_BY_NAME = {
   dim: '\x1b[2m',
@@ -74,20 +74,30 @@ function dig(obj, ...keys) {
 
 /**
  * Map payload cycle_mode or settings permission mode value to canonical mode value.
+ * Supports all 4 Antigravity Shift+Tab cycle states:
+ * - "auto" -> "proceed-in-sandbox"
+ * - "accept-edits" -> "accept-edits"
+ * - "plan" -> "plan"
+ * - "" (omitted) -> fallbackMode from settings.json ("request-review", "always-proceed", "strict", etc.)
  */
 function resolvePermissionMode(payload, fallbackMode = 'request-review') {
-  const cycle = payload && payload.cycle_mode ? String(payload.cycle_mode).toLowerCase() : '';
-  if (cycle === 'auto' || cycle === 'proceed-in-sandbox') return 'proceed-in-sandbox';
-  if (cycle === 'review' || cycle === 'request-review') return 'request-review';
-  if (cycle === 'yolo' || cycle === 'bypass' || cycle === 'always-proceed') return 'always-proceed';
-  if (cycle === 'strict') return 'strict';
+  const normalize = (val) => {
+    const s = String(val || '').toLowerCase().trim();
+    if (s === 'auto' || s === 'proceed-in-sandbox') return 'proceed-in-sandbox';
+    if (s === 'accept-edits' || s === 'accept_edits' || s === 'acceptedits' || s === 'edits') return 'accept-edits';
+    if (s === 'plan' || s === 'plan-mode' || s === 'plan_mode') return 'plan';
+    if (s === 'review' || s === 'request-review') return 'request-review';
+    if (s === 'yolo' || s === 'bypass' || s === 'always-proceed') return 'always-proceed';
+    if (s === 'strict') return 'strict';
+    return '';
+  };
 
-  const fb = String(fallbackMode || 'request-review').toLowerCase();
-  if (fb === 'auto' || fb === 'proceed-in-sandbox') return 'proceed-in-sandbox';
-  if (fb === 'review' || fb === 'request-review') return 'request-review';
-  if (fb === 'yolo' || fb === 'bypass' || fb === 'always-proceed') return 'always-proceed';
-  if (fb === 'strict') return 'strict';
-  return fallbackMode || 'request-review';
+  if (payload && payload.cycle_mode) {
+    const fromCycle = normalize(payload.cycle_mode);
+    if (fromCycle) return fromCycle;
+  }
+
+  return normalize(fallbackMode) || fallbackMode || 'request-review';
 }
 
 /**
@@ -106,14 +116,14 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     : (process.env.AGY_HUD_LINKS === '1' || (process.env.AGY_HUD_LINKS !== '0' && cfg.enableLinks !== false));
 
   let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
-  let FAST = '\u23E9', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
+  let FAST = '\u23E9', PLAY_DOUBLE = '\u23F5\u23F5', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
   let FULL = '\u2588', EMPTY = '\u2591';
   let PAUSE = '\u23F8', LOCK = '\uD83D\uDD12';
   let SPINNER_FRAMES = ['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'];
 
   if (noUnicode) {
     SEP = '|'; DOT = '*'; UP = '^'; DOWN = 'v';
-    FAST = '>>'; WARN = '!'; CHECK = '+'; TIMES = 'x';
+    FAST = '>>'; PLAY_DOUBLE = '>>'; WARN = '!'; CHECK = '+'; TIMES = 'x';
     FULL = '#'; EMPTY = '.';
     PAUSE = '||'; LOCK = '[lock]';
     SPINNER_FRAMES = ['|', '/', '-', '\\'];
@@ -142,6 +152,8 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   const colorQuotaCritical = resolveColor(colors.quotaCritical, Red, noColor);
   const colorPermReview = resolveColor(colors.permissionReview, '#FFD166', noColor);
   const colorPermAuto = resolveColor(colors.permissionAuto, Orange, noColor);
+  const colorPermAcceptEdits = resolveColor(colors.permissionAcceptEdits, '#C4A7FF', noColor);
+  const colorPermPlan = resolveColor(colors.permissionPlan, '#2DD4BF', noColor);
   const colorPermBypass = resolveColor(colors.permissionBypass, '#FF3B8A', noColor);
   const colorPermStrict = resolveColor(colors.permissionStrict, '#8EA2FF', noColor);
 
@@ -150,6 +162,14 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     if (pct >= 25) return colorQuotaMid;
     if (pct >= 15) return colorQuotaLow;
     return colorQuotaCritical;
+  }
+
+  /** Context usage shifts Green -> Yellow (>=50%) -> Orange (>=70%) -> Red (>=85%) as it fills up. */
+  function contextColor(usedPct) {
+    if (usedPct >= 85) return colorQuotaCritical;
+    if (usedPct >= 70) return colorQuotaLow;
+    if (usedPct >= 50) return colorQuotaMid;
+    return colorSuccess;
   }
 
   // ─── DATA EXTRACTION ──────────────────────────────────────────────────────────
@@ -204,15 +224,27 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
       .replace(/^Claude\s+Opus/i, 'Opus')
       .replace(/^Claude\s+Sonnet/i, 'Sonnet')
       .replace(/^Claude\s+Haiku/i, 'Haiku')
-      .replace(/\s*\((High|Medium|Low|Thinking)\)/gi, (_, m) => ` (${m[0].toUpperCase()})`);
+      .replace(/\s*\((XHigh|High|Medium|Low|Thinking|Orchestrator|Max)\)/gi, (_, m) => {
+        const u = m.toLowerCase();
+        if (u === 'xhigh') return ' (XH)';
+        if (u === 'orchestrator') return ' (Orch)';
+        if (u === 'max') return ' (Max)';
+        return ` (${m[0].toUpperCase()})`;
+      });
   }
 
   // ─── GIT & HYPERLINKS ─────────────────────────────────────────────────────────
   const branch = options.gitBranch != null ? options.gitBranch : '';
   const dirty = options.gitDirty ? '*' : '';
+  const ahead = Number(options.gitAhead) || 0;
+  const behind = Number(options.gitBehind) || 0;
   const gitRepoUrl = options.gitRepoUrl || '';
 
-  let branchText = branch ? `${branch}${dirty}` : '';
+  let abStr = '';
+  if (ahead > 0) abStr += ` ${UP}${ahead}`;
+  if (behind > 0) abStr += ` ${DOWN}${behind}`;
+
+  let branchText = branch ? `${branch}${dirty}${abStr}` : '';
   if (enableLinks && branch) {
     const linkUrl = gitRepoUrl || toFileUrl(project);
     branchText = makeLink(branchText, linkUrl, true);
@@ -282,10 +314,11 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     return `${colorLabel}${label}${R} ${col}${bar(pct, bLen, FULL, EMPTY)}${R} ${col}${pct}%${R}${rStr}`;
   }
 
-  const ctxBarStr = barLen > 0 ? ` ${colorSuccess}${bar(ctxPct, barLen, FULL, EMPTY)}${R}` : '';
+  const ctxCol = contextColor(ctxPct);
+  const ctxBarStr = barLen > 0 ? ` ${ctxCol}${bar(ctxPct, barLen, FULL, EMPTY)}${R}` : '';
   let ctxLabel;
   if (layout === 'tiny') {
-    ctxLabel = `${colorLabel}ctx${R} ${colorSuccess}${Math.round(ctxPct)}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
+    ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${Math.round(ctxPct)}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
   } else {
     ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${Math.round(ctxPct)}%${R}`
       + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`;
@@ -333,7 +366,7 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     line3 = `${colorLabel}--${R} ${colorSep}${SEP}${R}`;
   }
 
-  // ─── LINE 4: permission mode │ shell │ tasks │ agents [│ sandbox] ─────────────
+  // ─── LINE 4: permission mode │ shell │ tasks │ agents [│ plan │ skills │ mcp │ duration] ─
   const shellCount = Math.min(tData.shellCount || 0, 99);
   const taskCount = Math.min(tData.taskCount != null ? tData.taskCount : (j.task_count || 0), 99);
 
@@ -359,16 +392,24 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
 
   let permColor = colorPermReview;
   let permIcon = PAUSE;
-  let permText = 'review';
+  let permText = 'review mode on';
 
   if (permMode === 'request-review') {
     permColor = colorPermReview;
     permIcon = PAUSE;
-    permText = 'review';
+    permText = (layout === 'tiny' || layout === 'compact') ? 'review on' : 'review mode on';
   } else if (permMode === 'proceed-in-sandbox') {
     permColor = colorPermAuto;
     permIcon = FAST;
-    permText = (layout === 'tiny' || layout === 'compact') ? 'auto' : 'auto mode';
+    permText = (layout === 'tiny' || layout === 'compact') ? 'auto on' : 'auto mode on';
+  } else if (permMode === 'accept-edits') {
+    permColor = colorPermAcceptEdits;
+    permIcon = PLAY_DOUBLE;
+    permText = (layout === 'tiny') ? 'edits on' : 'accept edits on';
+  } else if (permMode === 'plan') {
+    permColor = colorPermPlan;
+    permIcon = PAUSE;
+    permText = (layout === 'tiny') ? 'plan on' : 'plan mode on';
   } else if (permMode === 'always-proceed') {
     permColor = colorPermBypass;
     permIcon = FAST;
@@ -376,7 +417,7 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   } else if (permMode === 'strict') {
     permColor = colorPermStrict;
     permIcon = LOCK;
-    permText = 'strict';
+    permText = (layout === 'tiny' || layout === 'compact') ? 'strict on' : 'strict mode on';
   }
 
   const permSection = (layout === 'tiny')
@@ -390,10 +431,48 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     line4 += ` ${colorSuccess}${DOT}${R} ${White}${taskCount} tasks${R}`;
   }
 
-  line4 += ` ${colorSuccess}${DOT}${R} ${White}${agentCount} agents${R}`;
+  let agentLabel = `${agentCount} agents`;
+  if (
+    agentCount > 0 &&
+    cfg.showSubagents !== false &&
+    layout === 'normal' &&
+    Array.isArray(tData.activeSubagents) &&
+    tData.activeSubagents.length > 0
+  ) {
+    const latestSub = tData.activeSubagents[tData.activeSubagents.length - 1];
+    const subElapsed = latestSub.elapsedSeconds != null
+      ? latestSub.elapsedSeconds
+      : (latestSub.startTime ? Math.max(0, Math.floor((Date.now() - new Date(latestSub.startTime).getTime()) / 1000)) : 0);
+    const subDur = formatDuration(subElapsed);
+    const roleDetail = subDur ? `${latestSub.role} ${subDur}` : latestSub.role;
+    agentLabel += ` ${colorLabel}(${roleDetail})${R}`;
+  }
+  line4 += ` ${colorSuccess}${DOT}${R} ${White}${agentLabel}${R}`;
+
+  if (cfg.showTodos !== false && tData.planProgress && tData.planProgress.total > 0 && layout !== 'tiny') {
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.planProgress.done}/${tData.planProgress.total} plan${R}`;
+  }
+
+  if (cfg.showSkills !== false && Array.isArray(tData.skills) && tData.skills.length > 0 && layout !== 'tiny') {
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.skills.length} skills${R}`;
+  }
+
+  if (cfg.showMcp !== false && Array.isArray(tData.mcpServers) && tData.mcpServers.length > 0 && layout !== 'tiny') {
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.mcpServers.length} mcp${R}`;
+  }
 
   if (dig(j, 'sandbox', 'enabled') === true) {
     line4 += ` ${colorSuccess}${DOT}${R} ${colorPermStrict}sandbox${R}`;
+  }
+
+  const sessionSec = options.sessionDurationSeconds != null
+    ? options.sessionDurationSeconds
+    : (tData.sessionDurationSeconds || 0);
+  if (sessionSec > 0 && layout !== 'tiny') {
+    const durStr = formatDuration(sessionSec);
+    if (durStr) {
+      line4 += ` ${colorSuccess}${DOT}${R} ${colorLabel}${durStr}${R}`;
+    }
   }
 
   if (cfg.preset === 'minimal') return [line1];

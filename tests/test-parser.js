@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const {
   formatResetTime,
+  formatDuration,
   getContextCapacity,
   resolveQuotaSegments,
   quotaPct,
@@ -24,9 +25,16 @@ const {
 assert.strictEqual(formatResetTime(6120), '1h 42m');
 assert.strictEqual(formatResetTime(900), '15m');
 
-// Context capacities
+assert.strictEqual(formatDuration(42), '42s');
+assert.strictEqual(formatDuration(860), '14m 20s');
+assert.strictEqual(formatDuration(4320), '1h 12m');
+
+// Context capacities (including full Gemini 4 element family)
 assert.strictEqual(getContextCapacity('Gemini 4 Argon'), 1000000);
 assert.strictEqual(getContextCapacity('gemini-4-argon'), 1000000);
+assert.strictEqual(getContextCapacity('Gemini 4 Neon (XHigh)'), 1000000);
+assert.strictEqual(getContextCapacity('Gemini 4 Carbon (High)'), 1000000);
+assert.strictEqual(getContextCapacity('Gemini 4 Hydrogen (Orchestrator)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.5 Flash'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.8 Flash (High)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.0 Pro'), 2000000);
@@ -35,6 +43,9 @@ assert.strictEqual(getContextCapacity('Claude Opus 4.6'), 200000);
 // Pricing & cache discount
 assert.strictEqual(estimateCost('Gemini 3.8 Flash (High)', 1000000, 0), 0.075);
 assert.strictEqual(estimateCost('Gemini 4 Argon', 1000000, 0, 0), 1.25);
+assert.strictEqual(estimateCost('Gemini 4 Neon (XHigh)', 1000000, 0, 0), 1.25);
+assert.strictEqual(estimateCost('Gemini 4 Carbon (High)', 1000000, 0, 0), 0.50);
+assert.strictEqual(estimateCost('Gemini 4 Hydrogen (Low)', 1000000, 0, 0), 0.15);
 // 800k cached (at 25% of 1.25 = 0.25) + 200k uncached (0.25) = 0.50
 assert.strictEqual(Number(estimateCost('Gemini 4 Argon', 1000000, 0, 800000).toFixed(4)), 0.5);
 
@@ -91,9 +102,9 @@ assert.strictEqual(argonNonProSegs[0].pct, 75);
 assert.strictEqual(argonNonProSegs[1].label, 'wk');
 assert.strictEqual(argonNonProSegs[1].pct, 88);
 
-// Test 3: Standard Gemini on Pro plan -> standard 5h and wk
+// Test 3: Standard Gemini (or Neon) on Pro plan -> standard 5h and wk
 const regularGeminiPayload = {
-  model: { display_name: 'Gemini 3.8 Flash (High)' },
+  model: { display_name: 'Gemini 4 Neon (XHigh)' },
   plan_tier: 'Google AI Pro',
   quota: {
     'gemini-5h': { remaining_fraction: 0.95, reset_in_seconds: 17000 },
@@ -110,7 +121,7 @@ assert.strictEqual(regularGeminiSegs[1].pct, 99);
 
 // Test 4: Claude / GPT / Haiku / o3 3P models -> 3p-5h and 3p-weekly
 const claudePayload = {
-  model: { display_name: 'Claude Sonnet 4' },
+  model: { display_name: 'Claude Sonnet 5.5 (High)' },
   plan_tier: 'Google AI Pro',
   quota: {
     '3p-5h': { remaining_fraction: 0.60, reset_in_seconds: 9000 },
@@ -149,7 +160,7 @@ assert.strictEqual(categoriseTool('read_file'), 'read');
 assert.strictEqual(categoriseTool('run_command'), 'bash');
 assert.strictEqual(categoriseTool('mcp__syncloudos__ping'), 'mcp');
 
-// Test 6: Transcript resolution & speed cache invalidation across conversation switches
+// Test 6: Transcript resolution, skills/MCP/checklist/subagent parsing & speed cache invalidation
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-hud-test-'));
 try {
   const statePath = path.join(tmpDir, 'antigravity-hud-state.json');
@@ -158,7 +169,29 @@ try {
   fs.mkdirSync(path.dirname(oldTranscript), { recursive: true });
   fs.mkdirSync(path.dirname(newTranscript), { recursive: true });
   fs.writeFileSync(oldTranscript, '{"tool_calls":[{"name":"read_file"}]}\n', 'utf8');
-  fs.writeFileSync(newTranscript, '{"tool_calls":[{"name":"run_command"},{"name":"swarm"}]}\n', 'utf8');
+  fs.writeFileSync(
+    newTranscript,
+    [
+      JSON.stringify({
+        created_at: '2026-11-22T12:00:00Z',
+        type: 'PLANNER_RESPONSE',
+        content: 'Plan:\n- [x] Step 1\n- [x] Step 2\n- [ ] Step 3',
+        tool_calls: [
+          { name: 'read_file', args: { Path: '"C:\\\\Users\\\\dev\\\\.agents\\\\skills\\\\improve\\\\SKILL.md"' } },
+          { name: 'mcp__syncloudos__query', args: {} }
+        ]
+      }),
+      JSON.stringify({
+        created_at: '2026-11-22T12:01:00Z',
+        type: 'PLANNER_RESPONSE',
+        tool_calls: [
+          { name: 'run_command', args: {} },
+          { name: 'invoke_subagent', args: { Role: '"Codebase Researcher"', TypeName: '"research"' } }
+        ]
+      })
+    ].join('\n') + '\n',
+    'utf8'
+  );
 
   // Seed stale state pointing to conv-old
   fs.writeFileSync(statePath, JSON.stringify({
@@ -178,8 +211,16 @@ try {
   const parsed = parseTranscript(resolved);
   assert.strictEqual(parsed.toolCounts.bash, 1);
   assert.strictEqual(parsed.toolCounts.agent, 1);
+  assert.strictEqual(parsed.toolCounts.read, 1);
+  assert.strictEqual(parsed.toolCounts.mcp, 1);
   assert.strictEqual(parsed.shellCount, 1);
   assert.strictEqual(parsed.agentInvoked, 1);
+  assert.deepStrictEqual(parsed.skills, ['improve']);
+  assert.deepStrictEqual(parsed.mcpServers, ['syncloudos']);
+  assert.deepStrictEqual(parsed.planProgress, { done: 2, total: 3 });
+  assert.strictEqual(parsed.activeSubagents.length, 1);
+  assert.strictEqual(parsed.activeSubagents[0].role, 'Codebase Researcher');
+  assert.strictEqual(parsed.sessionDurationSeconds, 60);
 
   // Speed cache scoping by conversationId
   const speedCachePath = path.join(tmpDir, 'speed-cache.json');
@@ -192,14 +233,18 @@ try {
   const speedOnSwitch = getSpeed(2500, speedCachePath, 'conv-new');
   assert.strictEqual(speedOnSwitch, 0);
 
-  // Git porcelain parser & TTL cache
+  // Git porcelain parser (including ahead / behind) & TTL cache
   const cleanGit = parsePorcelainBranchAndDirty('## main...origin/main\n');
   assert.strictEqual(cleanGit.branch, 'main');
   assert.strictEqual(cleanGit.dirty, '');
+  assert.strictEqual(cleanGit.ahead, 0);
+  assert.strictEqual(cleanGit.behind, 0);
 
-  const dirtyGit = parsePorcelainBranchAndDirty('## feat/hud...origin/feat/hud\n M src/quota.js\n?? new.js\n');
-  assert.strictEqual(dirtyGit.branch, 'feat/hud');
-  assert.strictEqual(dirtyGit.dirty, '*');
+  const abGit = parsePorcelainBranchAndDirty('## feat/hud...origin/feat/hud [ahead 2, behind 1]\n M src/quota.js\n?? new.js\n');
+  assert.strictEqual(abGit.branch, 'feat/hud');
+  assert.strictEqual(abGit.dirty, '*');
+  assert.strictEqual(abGit.ahead, 2);
+  assert.strictEqual(abGit.behind, 1);
 
   const detachedGit = parsePorcelainBranchAndDirty('## HEAD (no branch)\n');
   assert.strictEqual(detachedGit.branch, '');
@@ -217,6 +262,8 @@ try {
       '/fake/repo': {
         branch: 'cached-branch',
         dirty: '*',
+        ahead: 3,
+        behind: 0,
         gitRepoUrl: 'https://github.com/user/repo/tree/cached-branch',
         statusTimestamp: now,
         remoteTimestamp: now
@@ -227,6 +274,7 @@ try {
   assert.strictEqual(gitInfo.cached, true);
   assert.strictEqual(gitInfo.branch, 'cached-branch');
   assert.strictEqual(gitInfo.dirty, '*');
+  assert.strictEqual(gitInfo.ahead, 3);
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

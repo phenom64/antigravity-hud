@@ -140,10 +140,12 @@ if (arg === 'install') {
   };
 
   const getHUDLabel = (modeVal) => {
-    if (modeVal === 'request-review') return 'review';
-    if (modeVal === 'proceed-in-sandbox') return 'auto mode';
-    if (modeVal === 'always-proceed') return 'bypass permissions (YOLO)';
-    if (modeVal === 'strict') return 'strict';
+    if (modeVal === 'request-review') return '⏸ review mode on';
+    if (modeVal === 'proceed-in-sandbox') return '⏩ auto mode on';
+    if (modeVal === 'accept-edits') return '⏵⏵ accept edits on';
+    if (modeVal === 'plan') return '⏸ plan mode on';
+    if (modeVal === 'always-proceed') return '⏩ bypass permissions (YOLO)';
+    if (modeVal === 'strict') return '🔒 strict mode on';
     return modeVal;
   };
 
@@ -535,7 +537,7 @@ function runHud(raw) {
   const cachePath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'speed-cache.json');
   const streamSpeed = getSpeed(ctxOut, cachePath, convId);
 
-  const { branch, dirty, gitRepoUrl } = getGitInfo(project);
+  const { branch, dirty, ahead, behind, gitRepoUrl } = getGitInfo(project);
   const tPath = resolveTranscript(j);
   const transcriptData = parseTranscript(tPath, j.task_count || 0);
   const permMode = readPermissionMode();
@@ -543,6 +545,8 @@ function runHud(raw) {
   const lines = renderHUD(j, config, transcriptData, {
     gitBranch: branch,
     gitDirty: Boolean(dirty),
+    gitAhead: ahead,
+    gitBehind: behind,
     gitRepoUrl,
     speed: streamSpeed,
     permissionMode: permMode,

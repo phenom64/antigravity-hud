@@ -11,10 +11,32 @@ function formatResetTime(seconds) {
   return `${m}m`;
 }
 
+/** Format elapsed session or subagent duration in seconds: 1h 12m, 14m 20s, or 42s. */
+function formatDuration(seconds) {
+  if (seconds == null || seconds <= 0 || !Number.isFinite(seconds)) return '';
+  const total = Math.floor(seconds);
+  if (total <= 0) return '';
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 /** Get maximum token context capacity for a model name. */
 function getContextCapacity(modelName) {
   const m = (modelName || '').toLowerCase();
-  if (m.includes('argon')) return 1000000;
+  if (
+    m.includes('argon') ||
+    m.includes('neon') ||
+    m.includes('carbon') ||
+    m.includes('hydrogen') ||
+    m.includes('gemini 4') ||
+    m.includes('gemini-4')
+  ) {
+    return 1000000;
+  }
   if (
     m.includes('flash') ||
     m.includes('gemini 1.5') ||
@@ -49,6 +71,12 @@ const MODEL_PRICING = {
   'haiku': { input: 0.8, output: 4.0 },
   'gemini-4-argon': { input: 1.25, output: 5.0 },
   'argon': { input: 1.25, output: 5.0 },
+  'gemini-4-neon': { input: 1.25, output: 5.0 },
+  'neon': { input: 1.25, output: 5.0 },
+  'gemini-4-carbon': { input: 0.50, output: 2.0 },
+  'carbon': { input: 0.50, output: 2.0 },
+  'gemini-4-hydrogen': { input: 0.15, output: 0.6 },
+  'hydrogen': { input: 0.15, output: 0.6 },
   'gemini-3.8-flash': { input: 0.075, output: 0.3 },
   'gemini-3.5-flash': { input: 0.075, output: 0.3 },
   'gemini-2.5-flash': { input: 0.075, output: 0.3 },
@@ -94,7 +122,7 @@ function estimateCost(modelName, inTokens, outTokens, cacheReadTokens = 0) {
  * Rules:
  * - Argon on Pro: 'argon-wk' segment, plus a secondary '5h' warning segment if gemini-5h drops below 25%
  * - 3P models (Claude/GPT/o-series): '5h' (from 3p-5h) and 'wk' (from 3p-weekly)
- * - Regular Gemini models (or non-Pro Argon): '5h' (from gemini-5h) and 'wk' (from gemini-weekly)
+ * - Regular Gemini models (including Neon/Carbon/Hydrogen or non-Pro Argon): '5h' (from gemini-5h) and 'wk' (from gemini-weekly)
  */
 function resolveQuotaSegments(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -190,6 +218,7 @@ function resolveQuotaSegments(payload) {
 
 module.exports = {
   formatResetTime,
+  formatDuration,
   getContextCapacity,
   quotaPct,
   resolveQuotaSegments,

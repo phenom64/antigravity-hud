@@ -184,9 +184,20 @@ function cleanArgString(val) {
   return val.replace(/^"|"$/g, '').trim();
 }
 
+function countChecklistItems(text) {
+  if (!text || typeof text !== 'string') return null;
+  const doneMatches = text.match(/^\s*[-*]\s*\[[xX]\]\s+/gm);
+  const todoMatches = text.match(/^\s*[-*]\s*\[\s\]\s+/gm);
+  const done = doneMatches ? doneMatches.length : 0;
+  const todo = todoMatches ? todoMatches.length : 0;
+  if (done + todo === 0) return null;
+  return { done, total: done + todo };
+}
+
 /**
  * Bounded JSONL transcript reader (reads up to last 256KB).
- * Parses tool category tallies, shell/task/agent counts, active subagents, and MCP servers.
+ * Parses tool category tallies, shell/task/agent counts, active subagents (with elapsed runtime),
+ * loaded skills, MCP servers, checklist/plan progress, and session duration.
  */
 function parseTranscript(transcriptPath, initialTaskCount = 0) {
   const result = {
@@ -200,12 +211,15 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
     activeSubagents: [],
     skills: [],
     mcpServers: [],
-    planProgress: { done: 0, total: 0 }
+    planProgress: { done: 0, total: 0 },
+    sessionDurationSeconds: 0
   };
 
   if (!transcriptPath) return result;
+  let stats;
   try {
     if (!fs.existsSync(transcriptPath)) return result;
+    stats = fs.statSync(transcriptPath);
   } catch (_) {
     return result;
   }
@@ -215,12 +229,16 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
     if (!content) return result;
 
     const lines = content.split('\n');
-    if (lines.length > 1 && content.length >= 262144) {
+    const isTailSlice = lines.length > 1 && content.length >= 262144;
+    if (isTailSlice) {
       lines.shift();
     }
 
     const subagentsMap = new Map();
     const mcpSet = new Set();
+    const skillsSet = new Set();
+    let firstTsMs = (isTailSlice && stats && stats.birthtimeMs) ? stats.birthtimeMs : null;
+    let lastTsMs = null;
     let seqNum = 0;
 
     for (const line of lines) {
@@ -233,9 +251,23 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
       }
       seqNum++;
 
+      const rawTs = entry.created_at || entry.timestamp;
+      if (rawTs) {
+        const parsedMs = new Date(rawTs).getTime();
+        if (Number.isFinite(parsedMs) && parsedMs > 0) {
+          if (firstTsMs === null || parsedMs < firstTsMs) firstTsMs = parsedMs;
+          if (lastTsMs === null || parsedMs > lastTsMs) lastTsMs = parsedMs;
+        }
+      }
+
       if (entry.content && typeof entry.content === 'string') {
         const m = entry.content.match(/You have\s+(\d+)\s+active subagent/);
         if (m) result.activeAgents = parseInt(m[1], 10) || 0;
+
+        if (entry.type === 'PLANNER_RESPONSE') {
+          const cl = countChecklistItems(entry.content);
+          if (cl) result.planProgress = cl;
+        }
       }
 
       if (Array.isArray(entry.tool_calls)) {
@@ -254,33 +286,69 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
             if (parts[1]) mcpSet.add(parts[1]);
           }
 
+          const args = tc.arguments || tc.args || {};
+          const rawPath = cleanArgString(args.Path || args.AbsolutePath || '');
+          if (rawPath) {
+            const skillMatch = rawPath.match(/[\\/]skills[\\/]([^\\/]+)[\\/]SKILL\.md$/i);
+            if (skillMatch && skillMatch[1]) {
+              skillsSet.add(skillMatch[1]);
+            }
+            const mcpMatch = rawPath.match(/[\\/]mcp[\\/]([^\\/]+)[\\/]/i);
+            if (mcpMatch && mcpMatch[1]) {
+              mcpSet.add(mcpMatch[1]);
+            }
+          }
+
+          const writeContent = cleanArgString(args.Content || args.Replacement || '');
+          if (writeContent && writeContent.includes('- [')) {
+            const cl = countChecklistItems(writeContent.replace(/\\n/g, '\n'));
+            if (cl && cl.total >= 2) {
+              result.planProgress = cl;
+            }
+          }
+
           const name = toolName.toLowerCase();
           if (name === 'run_command') result.shellCount++;
           if (name === 'manage_task' || name === 'schedule' || name === 'run_workflow') result.taskCount++;
 
           if (name === 'invoke_subagent' || name === 'swarm') {
-            const args = tc.arguments || tc.args || {};
             const subs = args.Subagents || args.subagents;
             result.agentInvoked += Array.isArray(subs) ? subs.length : 1;
 
             const subId = cleanArgString(args.conversationID || args.Recipient) || `sub-${subagentsMap.size}`;
             const role = cleanArgString(args.Role || args.TypeName || args.name) || 'subagent';
             const model = cleanArgString(args.Model || args.model) || 'inherit';
-            const ts = entry.created_at || entry.timestamp;
+            const startTime = rawTs ? new Date(rawTs) : new Date();
             subagentsMap.set(subId, {
               id: subId,
               role,
               model,
-              startTime: ts ? new Date(ts) : new Date(),
+              startTime,
               status: 'running'
             });
+          } else if (name === 'manage_subagents') {
+            const action = cleanArgString(args.Action || args.action || '').toLowerCase();
+            if (action === 'kill_all') {
+              subagentsMap.clear();
+            }
           }
         }
       }
     }
 
-    result.activeSubagents = Array.from(subagentsMap.values());
+    const refNowMs = lastTsMs || Date.now();
+    result.activeSubagents = Array.from(subagentsMap.values()).map(sub => {
+      const startMs = sub.startTime instanceof Date ? sub.startTime.getTime() : Date.now();
+      const elapsedSeconds = Number.isFinite(startMs) ? Math.max(0, Math.floor((refNowMs - startMs) / 1000)) : 0;
+      return Object.assign({}, sub, { elapsedSeconds });
+    });
     result.mcpServers = Array.from(mcpSet);
+    result.skills = Array.from(skillsSet);
+
+    if (firstTsMs && Number.isFinite(firstTsMs)) {
+      const endMs = lastTsMs && lastTsMs >= firstTsMs ? lastTsMs : Date.now();
+      result.sessionDurationSeconds = Math.max(0, Math.floor((endMs - firstTsMs) / 1000));
+    }
   } catch (_) {}
 
   result.shellCount = Math.min(result.shellCount, 99);

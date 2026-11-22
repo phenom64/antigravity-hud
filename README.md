@@ -213,23 +213,24 @@ export AGY_HUD_LAYOUT=compact
 ## Output lines explained
 
 ```
-Line 1:  Model │ repo git:(branch*) │ ● state
+Line 1:  Gemini 4 Argon (High) │ antigravity-hud git:(master* ↑1) │ ⠸ working
 Line 2:  ctx [████░░░░] 21% (48.0k ↑ / 4.0k ↓ / 1.0m) │ argon-wk [█████░] 89% 6d 12h │ ~$0.041 │ 35.4 t/s
 Line 3:  ✔ read ×5 │ ✔ search ×1 │ ✔ edit ×2 │ ✔ bash ×3 │
-Line 4:  ⏩ auto mode ● 3 shell ● 1 tasks ● 0 agents
+Line 4:  ⏵⏵ accept edits on ● 3 shell ● 1 tasks ● 1 agents (Codebase Researcher 42s) ● 3/5 plan ● 2 skills ● 1 mcp ● 14m 20s
 ```
 
 | Element | Source |
 |---|---|
-| Model name | `model.display_name` from stdin JSON |
+| Model name | `model.display_name` from stdin JSON (supports Gemini 4 Argon/Neon/Carbon/Hydrogen, Gemini 3.x, Claude 4.6/5.5, GPT/o-series) |
 | Repo | basename of `workspace.project_dir` (OSC 8 linked to local folder) |
-| Branch + dirty | `git status --porcelain -b` (cached 5s TTL, OSC 8 linked to GitHub branch tree) |
+| Branch + dirty + ahead/behind | `git status --porcelain -b` (cached 5s TTL, shows `*`, `↑N`, `↓M`, OSC 8 linked to GitHub branch tree) |
 | State + spinner | `agent_state`, spinner animates during active states (`⚠ confirm` when confirmation pending) |
-| Context bar | `context_window.used_percentage` with token counts |
+| Context bar | `context_window.used_percentage` with token counts; colour shifts green → yellow (`≥50%`) → orange (`≥70%`) → red (`≥85%`) |
 | Quotas | `argon-wk` on Gemini 4 Argon Pro (plus `5h` if `<25%`), or `5h` + `wk` for standard Gemini and 3P models |
 | Cost estimation | `~$0.041` cache-aware API-equivalent cost estimate (not exact Antigravity billing) |
 | Tool tallies | Parsed from active conversation transcript JSONL |
-| Shell / tasks / agents | Counted from `run_command`, `manage_task`/`schedule`/`run_workflow`, and subagent/`swarm` calls |
+| Mode badge | Live `Shift+Tab` `cycle_mode` (`⏩ auto mode on`, `⏵⏵ accept edits on`, `⏸ plan mode on`) or `settings.json` fallback (`⏩ bypass permissions (YOLO)`, `⏸ review mode on`, `🔒 strict mode on`) |
+| Shell / tasks / agents / telemetry | Counted from transcript JSONL alongside active subagent role + timer, checklist progress (`3/5 plan`), active skills, MCP servers, and session duration |
 
 ### Quota colour thresholds
 
