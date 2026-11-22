@@ -2,7 +2,7 @@
 # ────────────────────────────────────────────────────────────────────────
 # antigravity-hud installer (macOS / Linux)
 #
-# 1. Checks that antigravity-hud is on PATH (via npm install -g @phenom64/antigravity-hud)
+# 1. Checks that antigravity-hud is on PATH (via npm install -g antigravity-hud)
 # 2. Patches ~/.gemini/antigravity-cli/settings.json to use the HUD
 # 3. Backs up existing settings before patching
 # ────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ echo ""
 # ── Check that antigravity-hud is on PATH ──────────────────────────────
 if ! command -v antigravity-hud &>/dev/null; then
   echo "  [!] antigravity-hud not found on PATH."
-  echo "      Run: npm install -g @phenom64/antigravity-hud"
+  echo "      Run: npm install -g antigravity-hud"
   echo ""
   exit 1
 fi

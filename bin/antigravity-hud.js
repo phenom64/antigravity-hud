@@ -47,6 +47,79 @@ const LIKELY_KEYS = [
 
 const SETTINGS_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli');
 const SETTINGS_FILE = path.join(SETTINGS_DIR, 'settings.json');
+const STANDALONE_DIR = path.join(SETTINGS_DIR, 'antigravity-hud');
+const STANDALONE_BIN = path.join(STANDALONE_DIR, 'bin', 'antigravity-hud.js');
+
+function findOnPath() {
+  try {
+    const isWin = os.platform() === 'win32';
+    const checkCmd = isWin ? 'where' : 'which';
+    const checkArgs = isWin ? ['antigravity-hud'] : ['-a', 'antigravity-hud'];
+    const out = execFileSync(checkCmd, checkArgs, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    const matches = out
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .filter(p => !p.includes(`${path.sep}_npx${path.sep}`) && !p.includes('/_npx/'));
+    return matches[0] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function formatStandaloneCommand(binPath) {
+  let resolved = binPath;
+  if (os.platform() === 'win32' && /\s/.test(resolved)) {
+    try {
+      const shortPath = execFileSync(
+        'cmd.exe',
+        ['/c', `for %I in ("${resolved}") do @echo %~sI`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+      ).trim();
+      if (shortPath && !/\s/.test(shortPath)) resolved = shortPath;
+    } catch (_) {}
+  }
+  return /\s/.test(resolved) ? `node "${resolved}"` : `node ${resolved}`;
+}
+
+function isHudCommand(command) {
+  if (typeof command !== 'string') return false;
+  const trimmed = command.trim();
+  if (trimmed === 'antigravity-hud') return true;
+  const normalized = trimmed.replace(/\\/g, '/');
+  const standaloneNorm = STANDALONE_BIN.replace(/\\/g, '/');
+  return (
+    normalized.includes(standaloneNorm) ||
+    normalized.endsWith('/antigravity-hud/bin/antigravity-hud.js') ||
+    normalized.endsWith('/antigravity-hud/bin/antigravity-hud.js"')
+  );
+}
+
+function installStandaloneRuntime() {
+  const pkgRoot = path.resolve(__dirname, '..');
+  if (path.resolve(STANDALONE_DIR) === pkgRoot) return;
+
+  fs.mkdirSync(STANDALONE_DIR, { recursive: true });
+  for (const rel of ['bin', 'src', 'package.json']) {
+    const srcPath = path.join(pkgRoot, rel);
+    const dstPath = path.join(STANDALONE_DIR, rel);
+    if (fs.existsSync(srcPath)) {
+      fs.cpSync(srcPath, dstPath, { recursive: true, force: true });
+    }
+  }
+  const sampleSrc = path.join(pkgRoot, 'docs', 'payload-examples', 'statusline-last.example.json');
+  if (fs.existsSync(sampleSrc)) {
+    const sampleDst = path.join(STANDALONE_DIR, 'docs', 'payload-examples', 'statusline-last.example.json');
+    fs.mkdirSync(path.dirname(sampleDst), { recursive: true });
+    fs.copyFileSync(sampleSrc, sampleDst);
+  }
+  if (os.platform() !== 'win32' && fs.existsSync(STANDALONE_BIN)) {
+    try { fs.chmodSync(STANDALONE_BIN, 0o755); } catch (_) {}
+  }
+}
 
 function getExistingPermissionKey(settings) {
   if (!settings || typeof settings !== 'object') return null;
@@ -223,8 +296,8 @@ if (arg === 'install') {
 // ─── SUBCOMMANDS ────────────────────────────────────────────────────────────────
 
 function runInstall() {
-  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  const settingsFile = path.join(settingsDir, 'settings.json');
+  const settingsDir = SETTINGS_DIR;
+  const settingsFile = SETTINGS_FILE;
 
   console.log(`\n  ${B}${Cyan}antigravity-hud install${R}`);
   console.log(`  ${Gray}=======================${R}\n`);
@@ -234,6 +307,22 @@ function runInstall() {
   } catch (err) {
     console.error(`  ${Red}[!] Failed to create settings directory:${R}`, err.message);
     process.exit(1);
+  }
+
+  const globalBin = findOnPath();
+  let targetCommand = 'antigravity-hud';
+  let usedStandalone = false;
+
+  if (!globalBin) {
+    try {
+      installStandaloneRuntime();
+      usedStandalone = true;
+      targetCommand = formatStandaloneCommand(STANDALONE_BIN);
+      console.log(`  ${Green}[OK] Installed standalone runtime to: ${STANDALONE_DIR}${R}`);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to install standalone runtime:${R}`, err.message);
+      process.exit(1);
+    }
   }
 
   let settings = {};
@@ -252,11 +341,15 @@ function runInstall() {
 
   const alreadyConfigured = prevStatusLine &&
     prevStatusLine.type === 'command' &&
-    prevStatusLine.command === 'antigravity-hud' &&
+    prevStatusLine.command === targetCommand &&
     prevStatusLine.enabled === true;
 
   if (alreadyConfigured) {
-    console.log(`  ${Green}[OK] Already configured. statusLine command is already set to 'antigravity-hud'.${R}\n`);
+    if (usedStandalone) {
+      console.log(`  ${Green}[OK] Runtime updated. statusLine is already configured.${R}\n`);
+    } else {
+      console.log(`  ${Green}[OK] Already configured. statusLine command is already set to '${targetCommand}'.${R}\n`);
+    }
     process.exit(0);
   }
 
@@ -271,7 +364,7 @@ function runInstall() {
 
   settings.statusLine = {
     type: 'command',
-    command: 'antigravity-hud',
+    command: targetCommand,
     enabled: true
   };
 
@@ -295,25 +388,22 @@ function runDoctor() {
   console.log(`\n  ${B}${Cyan}Antigravity HUD Diagnostics (Doctor)${R}`);
   console.log(`  ${Gray}===================================${R}\n`);
 
-  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  const settingsFile = path.join(settingsDir, 'settings.json');
+  const settingsDir = SETTINGS_DIR;
+  const settingsFile = SETTINGS_FILE;
 
   console.log(`  ${White}OS:${R} ${os.type()} (${os.platform()} ${os.arch()})`);
   console.log(`  ${White}Node.js:${R} ${process.version}`);
   console.log(`  ${White}Settings Path:${R} ${settingsFile}`);
 
-  let onPath = false;
-  let binLocation = '';
-  try {
-    const checkCmd = os.platform() === 'win32' ? 'where' : 'which';
-    binLocation = execFileSync(checkCmd, ['antigravity-hud'], { encoding: 'utf8' }).trim();
-    onPath = true;
-  } catch (_) {}
+  const binLocation = findOnPath();
+  const hasStandalone = fs.existsSync(STANDALONE_BIN);
 
-  if (onPath) {
+  if (binLocation) {
     console.log(`  ${White}PATH Check:${R} ${Green}[OK] Found on PATH: ${binLocation}${R}`);
+  } else if (hasStandalone) {
+    console.log(`  ${White}PATH Check:${R} ${Green}[OK] Standalone runtime installed: ${STANDALONE_BIN}${R}`);
   } else {
-    console.log(`  ${White}PATH Check:${R} ${Yellow}[!] 'antigravity-hud' not found on PATH. Run: npm install -g @phenom64/antigravity-hud${R}`);
+    console.log(`  ${White}PATH Check:${R} ${Yellow}[!] 'antigravity-hud' not found on PATH. Run: npx antigravity-hud install (or npm install -g antigravity-hud)${R}`);
   }
 
   let settings = {};
@@ -334,7 +424,7 @@ function runDoctor() {
     console.log(JSON.stringify(currentStatusLine, null, 2));
     const command = currentStatusLine.command;
     const enabled = currentStatusLine.enabled;
-    if (command === 'antigravity-hud' && enabled === true) {
+    if (isHudCommand(command) && enabled === true) {
       console.log(`  ${Green}[✓] Antigravity is currently configured to use antigravity-hud!${R}`);
     } else {
       console.log(`  ${Yellow}[!] Antigravity statusLine is configured to run something else: '${command}' (enabled: ${enabled})${R}`);
@@ -365,8 +455,8 @@ function runUninstall() {
   console.log(`\n  ${B}${Cyan}antigravity-hud uninstall${R}`);
   console.log(`  ${Gray}=========================${R}\n`);
 
-  const settingsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  const settingsFile = path.join(settingsDir, 'settings.json');
+  const settingsDir = SETTINGS_DIR;
+  const settingsFile = SETTINGS_FILE;
 
   let settings = {};
   let exists = false;
@@ -386,7 +476,7 @@ function runUninstall() {
   }
 
   const currentStatusLine = settings.statusLine;
-  const isTarget = currentStatusLine && currentStatusLine.command === 'antigravity-hud';
+  const isTarget = currentStatusLine && isHudCommand(currentStatusLine.command);
 
   if (!isTarget) {
     console.log(`  ${Yellow}[!] The statusLine command is not currently configured to use 'antigravity-hud'.${R}`);
@@ -399,6 +489,15 @@ function runUninstall() {
     } catch (err) {
       console.error(`  ${Red}[!] Failed to update settings.json:${R}`, err.message);
       process.exit(1);
+    }
+  }
+
+  if (fs.existsSync(STANDALONE_DIR)) {
+    try {
+      fs.rmSync(STANDALONE_DIR, { recursive: true, force: true });
+      console.log(`  ${Green}[OK] Removed standalone runtime: ${STANDALONE_DIR}${R}`);
+    } catch (err) {
+      console.warn(`  ${Yellow}[!] Could not remove standalone runtime (${STANDALONE_DIR}): ${err.message}${R}`);
     }
   }
 

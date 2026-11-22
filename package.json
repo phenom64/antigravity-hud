@@ -1,10 +1,10 @@
 {
-  "name": "@phenom64/antigravity-hud",
+  "name": "antigravity-hud",
   "version": "0.5.3",
   "description": "A beautiful, cross-platform statusline HUD for the Antigravity CLI: subagent runtimes, rate limit reset timers, context windows, OSC 8 links, tool tallies, and vibes.",
   "main": "bin/antigravity-hud.js",
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "bin": {
     "antigravity-hud": "bin/antigravity-hud.js"
@@ -14,6 +14,8 @@
   },
   "keywords": [
     "antigravity",
+    "antigravity-cli",
+    "agy",
     "gemini",
     "claude",
     "statusline",
@@ -23,6 +25,10 @@
   ],
   "author": "KK",
   "license": "MIT",
+  "homepage": "https://github.com/phenom64/antigravity-hud#readme",
+  "bugs": {
+    "url": "https://github.com/phenom64/antigravity-hud/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/phenom64/antigravity-hud.git"

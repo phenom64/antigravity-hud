@@ -4,7 +4,7 @@
   Installs antigravity-hud and patches the Antigravity CLI settings to use it.
 
 .DESCRIPTION
-  1. Checks that antigravity-hud is available on PATH (via npm install -g @phenom64/antigravity-hud).
+  1. Checks that antigravity-hud is available on PATH (via npm install -g antigravity-hud).
   2. Patches ~/.gemini/antigravity-cli/settings.json to set the statusLine command.
   3. Backs up the existing settings file before patching.
 
@@ -27,7 +27,7 @@ Write-Host ""
 $hudBin = Get-Command "antigravity-hud" -ErrorAction SilentlyContinue
 if (-not $hudBin) {
   Write-Host "  [!] antigravity-hud not found on PATH." -ForegroundColor Yellow
-  Write-Host "      Run: npm install -g @phenom64/antigravity-hud" -ForegroundColor Gray
+  Write-Host "      Run: npm install -g antigravity-hud" -ForegroundColor Gray
   Write-Host ""
   exit 1
 }

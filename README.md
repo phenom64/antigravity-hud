@@ -1,5 +1,7 @@
 # antigravity-hud
 
+[![npm version](https://img.shields.io/npm/v/antigravity-hud)](https://www.npmjs.com/package/antigravity-hud)
+[![npm downloads](https://img.shields.io/npm/dm/antigravity-hud)](https://www.npmjs.com/package/antigravity-hud)
 [![License](https://img.shields.io/github/license/phenom64/antigravity-hud)](LICENSE)
 
 > A 4-line statusline HUD for the [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli).
@@ -45,24 +47,31 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Installation
 
-Install globally and patch `~/.gemini/antigravity-cli/settings.json`:
+### One-command install (recommended)
 
-**Windows (PowerShell):**
-```powershell
-npm install -g @phenom64/antigravity-hud; antigravity-hud install
+Works out of the box on macOS, Linux, and Windows (Node.js 18+):
+
+```bash
+npx antigravity-hud install
 ```
+
+This installs a zero-dependency standalone copy into `~/.gemini/antigravity-cli/antigravity-hud/`, backs up your existing `~/.gemini/antigravity-cli/settings.json` (keeping the 5 newest backups), and wires up `statusLine` automatically. Re-run `npx antigravity-hud@latest install` anytime to upgrade.
+
+### Global install (adds `antigravity-hud` to your `PATH`)
+
+If you also want to run `antigravity-hud configure`, `doctor`, or `mode` directly without `npx`:
 
 **macOS / Linux:**
 ```bash
-npm install -g @phenom64/antigravity-hud && antigravity-hud install
+npm install -g antigravity-hud && antigravity-hud install
 ```
 
-**Using npx:**
-```bash
-npx @phenom64/antigravity-hud install
+**Windows (PowerShell):**
+```powershell
+npm install -g antigravity-hud; antigravity-hud install
 ```
 
-`antigravity-hud install` creates `~/.gemini/antigravity-cli/settings.json` if needed, backs up your existing settings (`settings.json.backup-antigravity-hud-YYYYMMDD-HHMMSS`, keeping the 5 newest backups), and sets `statusLine` to run `antigravity-hud`.
+> Both methods create `~/.gemini/antigravity-cli/settings.json` if needed, back up existing settings (`settings.json.backup-antigravity-hud-YYYYMMDD-HHMMSS`), and configure `statusLine`.
 
 ### Verify installation
 
