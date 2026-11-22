@@ -2,7 +2,7 @@
 # ────────────────────────────────────────────────────────────────────────
 # antigravity-hud installer (macOS / Linux)
 #
-# 1. Checks that antigravity-hud is on PATH (via npm install -g)
+# 1. Checks that antigravity-hud is on PATH (via npm install -g @phenom64/antigravity-hud)
 # 2. Patches ~/.gemini/antigravity-cli/settings.json to use the HUD
 # 3. Backs up existing settings before patching
 # ────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ echo ""
 # ── Check that antigravity-hud is on PATH ──────────────────────────────
 if ! command -v antigravity-hud &>/dev/null; then
   echo "  [!] antigravity-hud not found on PATH."
-  echo "      Run: npm install -g antigravity-hud"
+  echo "      Run: npm install -g @phenom64/antigravity-hud"
   echo ""
   exit 1
 fi
@@ -31,7 +31,7 @@ mkdir -p "$SETTINGS_DIR"
 
 # ── Backup existing settings ────────────────────────────────────────────
 if [ -f "$SETTINGS_FILE" ]; then
-  BACKUP="$SETTINGS_FILE.bak.$(date +%Y%m%d-%H%M%S)"
+  BACKUP="$SETTINGS_DIR/settings.json.backup-antigravity-hud-$(date +%Y%m%d-%H%M%S)"
   cp "$SETTINGS_FILE" "$BACKUP"
   echo "  [OK] Backed up settings to: $(basename "$BACKUP")"
 fi

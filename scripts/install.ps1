@@ -1,10 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Installs antigravity-hud and patches the Antigravity CLI settings to use it.
 
 .DESCRIPTION
-  1. Checks that antigravity-hud is available on PATH (via npm install -g).
+  1. Checks that antigravity-hud is available on PATH (via npm install -g @phenom64/antigravity-hud).
   2. Patches ~/.gemini/antigravity-cli/settings.json to set the statusLine command.
   3. Backs up the existing settings file before patching.
 
@@ -27,7 +27,7 @@ Write-Host ""
 $hudBin = Get-Command "antigravity-hud" -ErrorAction SilentlyContinue
 if (-not $hudBin) {
   Write-Host "  [!] antigravity-hud not found on PATH." -ForegroundColor Yellow
-  Write-Host "      Run: npm install -g antigravity-hud" -ForegroundColor Gray
+  Write-Host "      Run: npm install -g @phenom64/antigravity-hud" -ForegroundColor Gray
   Write-Host ""
   exit 1
 }
@@ -41,7 +41,7 @@ if (-not (Test-Path $settingsDir)) {
 
 # ── Load or create settings ─────────────────────────────────────────────
 if (Test-Path $settingsFile) {
-  $backupFile = "$settingsFile.bak.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  $backupFile = Join-Path $settingsDir "settings.json.backup-antigravity-hud-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
   Copy-Item $settingsFile $backupFile -Force
   Write-Host "  [OK] Backed up settings to: $(Split-Path $backupFile -Leaf)" -ForegroundColor Green
 

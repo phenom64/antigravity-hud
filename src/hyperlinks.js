@@ -9,4 +9,16 @@ function makeLink(text, url, enableLinks = true) {
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 
-module.exports = { makeLink };
+/**
+ * Convert a Windows or Unix filesystem path into a file:// URL.
+ */
+function toFileUrl(p) {
+  if (!p) return '';
+  let normalized = String(p).replace(/\\/g, '/');
+  if (!normalized.startsWith('/')) {
+    normalized = '/' + normalized;
+  }
+  return `file://${normalized}`;
+}
+
+module.exports = { makeLink, toFileUrl };

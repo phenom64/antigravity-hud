@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-11-22
+
+### Fixed & Improved
+- 🐛 **Conversation-Scoped Transcript & Speed Cache**:
+  - Fixed `resolveTranscript()` in `src/transcript.js` where `antigravity-hud-state.json` permanently pinned the HUD to an older conversation's `transcript.jsonl` across new CLI sessions.
+  - Added automatic path resolution for Antigravity CLI v1.5+ payloads where `transcript_path` points to `.gemini/antigravity/brain/<id>` while the CLI stores logs under `.gemini/antigravity-cli/brain/<id>`.
+  - Scoped `speed-cache.json` by `conversationId` so switching conversations resets `tok/s` velocity cleanly without cross-session delta spikes.
+- ⚡ **Git Status & Remote TTL Caching (`src/git.js`)**:
+  - Combined `git branch` and `git status` into a single `git status --porcelain -b` call cached with a 5-second TTL (and 60-second TTL for `git remote get-url origin`), eliminating 3 synchronous `git` process spawns per render tick.
+- 🔄 **Antigravity CLI v1.5.14 Payload, Tools & Telemetry**:
+  - Added live `cycle_mode` payload resolution (`auto`, `review`, `yolo`, `strict`), `tool_confirmation_pending` alert badge (`⚠ confirm`), and `sandbox.enabled` indicator (`sandbox`).
+  - Added tool categorisation for `swarm` (`agent`) and `run_workflow` (`task`).
+  - Added `gemini-3.8-flash`, `gemini-3.0-pro`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-5`, `o3`, and `o4` to `MODEL_PRICING`, with a 75% prompt-cache discount for `cache_read_input_tokens`.
+  - Expanded 3P quota detection to include `haiku`, `o1`, `o3`, and `o4` models, and added an automatic secondary `5h` warning bar on Gemini 4 Argon Pro when `gemini-5h` drops below 25%.
+- 🏗️ **Unified Modular Architecture & DX Polish**:
+  - Unified `bin/antigravity-hud.js` and `src/` (`src/render/lines.js`, `src/transcript.js`, `src/quota.js`, `src/hyperlinks.js`, `src/git.js`) so the CLI and unit test suite exercise the exact same production renderer.
+  - Preserved all config keys in `antigravity-hud configure`, added an interactive toggle for OSC 8 terminal hyperlinks, and capped `settings.json` backups to the 5 most recent files.
+
 ## [0.5.0] - 2026-10-19
 
 ### Added

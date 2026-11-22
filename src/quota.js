@@ -15,9 +15,19 @@ function formatResetTime(seconds) {
 function getContextCapacity(modelName) {
   const m = (modelName || '').toLowerCase();
   if (m.includes('argon')) return 1000000;
-  if (m.includes('flash') || m.includes('gemini 1.5') || m.includes('gemini 3.5') || m.includes('gemini 3.8')) return 1000000;
-  if (m.includes('pro') || m.includes('gemini 2.0') || m.includes('gemini 3.0')) return 2000000;
-  return 200000; // Claude default
+  if (
+    m.includes('flash') ||
+    m.includes('gemini 1.5') ||
+    m.includes('gemini 2.5') ||
+    m.includes('gemini 3.5') ||
+    m.includes('gemini 3.8')
+  ) {
+    return 1000000;
+  }
+  if (m.includes('pro') || m.includes('gemini 2.0') || m.includes('gemini 3.0')) {
+    return 2000000;
+  }
+  return 200000; // Claude / 3P default
 }
 
 /** Get remaining quota percentage, defaulting to 100 if missing or null. */
@@ -29,11 +39,61 @@ function quotaPct(q) {
 }
 
 /**
+ * Model pricing rates in USD per million tokens.
+ * NOTE: This is an API-equivalent estimate only and may be stale.
+ * These are conservative rates for cost approximation, not exact Antigravity billing.
+ */
+const MODEL_PRICING = {
+  'opus': { input: 15.0, output: 75.0 },
+  'sonnet': { input: 3.0, output: 15.0 },
+  'haiku': { input: 0.8, output: 4.0 },
+  'gemini-4-argon': { input: 1.25, output: 5.0 },
+  'argon': { input: 1.25, output: 5.0 },
+  'gemini-3.8-flash': { input: 0.075, output: 0.3 },
+  'gemini-3.5-flash': { input: 0.075, output: 0.3 },
+  'gemini-2.5-flash': { input: 0.075, output: 0.3 },
+  'gemini-2.0-flash': { input: 0.075, output: 0.3 },
+  'gemini-1.5-flash': { input: 0.075, output: 0.3 },
+  'flash': { input: 0.075, output: 0.3 },
+  'gemini-3.0-pro': { input: 1.25, output: 5.0 },
+  'gemini-2.5-pro': { input: 1.25, output: 5.0 },
+  'gemini-1.5-pro': { input: 1.25, output: 5.0 },
+  'gpt-5': { input: 2.5, output: 10.0 },
+  'o3': { input: 2.0, output: 8.0 },
+  'o4': { input: 1.1, output: 4.4 },
+  'default': { input: 3.0, output: 15.0 }
+};
+
+/**
+ * Estimate API-equivalent USD cost from input, output, and optional cache-read tokens.
+ */
+function estimateCost(modelName, inTokens, outTokens, cacheReadTokens = 0) {
+  const modelLower = String(modelName || '').toLowerCase();
+  let pricing = MODEL_PRICING['default'];
+
+  for (const [key, val] of Object.entries(MODEL_PRICING)) {
+    if (key !== 'default' && modelLower.includes(key)) {
+      pricing = val;
+      break;
+    }
+  }
+
+  const totalIn = Math.max(0, Number(inTokens) || 0);
+  const totalOut = Math.max(0, Number(outTokens) || 0);
+  const cachedIn = Math.max(0, Math.min(totalIn, Number(cacheReadTokens) || 0));
+  const uncachedIn = Math.max(0, totalIn - cachedIn);
+
+  const inputUsd = ((uncachedIn / 1000000) * pricing.input) + ((cachedIn / 1000000) * pricing.input * 0.25);
+  const outputUsd = (totalOut / 1000000) * pricing.output;
+  return inputUsd + outputUsd;
+}
+
+/**
  * Resolve quota segments to render based on model and plan tier.
  *
  * Rules:
- * - Argon on Pro: single 'argon-wk' segment (separate weekly limits for Pro subscribers)
- * - 3P models (Claude/GPT): '5h' (from 3p-5h) and 'wk' (from 3p-weekly)
+ * - Argon on Pro: 'argon-wk' segment, plus a secondary '5h' warning segment if gemini-5h drops below 25%
+ * - 3P models (Claude/GPT/o-series): '5h' (from 3p-5h) and 'wk' (from 3p-weekly)
  * - Regular Gemini models (or non-Pro Argon): '5h' (from gemini-5h) and 'wk' (from gemini-weekly)
  */
 function resolveQuotaSegments(payload) {
@@ -54,7 +114,7 @@ function resolveQuotaSegments(payload) {
 
   const isArgon = /argon/i.test(modelName);
   const isPro = /pro/i.test(planTier);
-  const is3p = /claude|opus|sonnet|gpt/i.test(modelName);
+  const is3p = /claude|opus|sonnet|haiku|gpt|o1|o3|o4/i.test(modelName);
 
   if (isArgon && isPro) {
     let argonKey = 'gemini-argon-wtu-weekly';
@@ -63,7 +123,7 @@ function resolveQuotaSegments(payload) {
       if (foundKey) argonKey = foundKey;
     }
     const qArgon = quota[argonKey] || {};
-    return [
+    const segments = [
       {
         id: 'argon-wk',
         label: 'argon-wk',
@@ -72,6 +132,19 @@ function resolveQuotaSegments(payload) {
         resetSeconds: qArgon.reset_in_seconds
       }
     ];
+
+    const q5h = quota['gemini-5h'];
+    if (q5h && q5h.remaining_fraction != null && quotaPct(q5h) < 25) {
+      segments.push({
+        id: '5h',
+        label: '5h',
+        quota: q5h,
+        pct: quotaPct(q5h),
+        resetSeconds: q5h.reset_in_seconds
+      });
+    }
+
+    return segments;
   }
 
   if (is3p) {
@@ -115,4 +188,11 @@ function resolveQuotaSegments(payload) {
   ];
 }
 
-module.exports = { formatResetTime, getContextCapacity, quotaPct, resolveQuotaSegments };
+module.exports = {
+  formatResetTime,
+  getContextCapacity,
+  quotaPct,
+  resolveQuotaSegments,
+  MODEL_PRICING,
+  estimateCost
+};
