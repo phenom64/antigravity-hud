@@ -9,20 +9,25 @@ const DEFAULT_CONFIG = {
   preset: 'full',
   showCost: true,
   showSpeed: true,
+  showCacheHit: true,
+  showQuotaPace: false,
   showSkills: true,
   showMcp: true,
   showSubagents: true,
   showTodos: true,
+  showArtifacts: true,
+  showConversationId: false,
   enableLinks: true,
   colorMode: true,
   unicodeMode: true,
   colors: {}
 };
 
-function loadConfig() {
+function loadConfig(configPathOverride = null) {
+  const targetPath = configPathOverride || process.env.AGY_HUD_CONFIG || CONFIG_PATH;
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const data = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    if (targetPath && fs.existsSync(targetPath)) {
+      const data = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
       return Object.assign({}, DEFAULT_CONFIG, data);
     }
   } catch (_) {}

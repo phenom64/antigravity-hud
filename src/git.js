@@ -89,11 +89,21 @@ function writeStateFile(statePath, state) {
   } catch (_) {}
 }
 
+/** Compare semver-like CLI version strings (returns true if version >= targetMajor.targetMinor). */
+function isCliVersionAtLeast(version, targetMajor, targetMinor) {
+  if (!version || typeof version !== 'string') return false;
+  const m = version.trim().match(/^(\d+)\.(\d+)/);
+  if (!m) return false;
+  const maj = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  return maj > targetMajor || (maj === targetMajor && min >= targetMinor);
+}
+
 /**
  * Retrieve git branch, dirty marker, ahead/behind counts, and remote tree URL with TTL caching.
  */
 function getGitInfo(project, options = {}) {
-  if (!project) return { branch: '', dirty: '', ahead: 0, behind: 0, gitRepoUrl: '', cached: false };
+  if (!project) return { vcsType: 'git', branch: '', dirty: '', ahead: 0, behind: 0, gitRepoUrl: '', cached: false };
 
   const statePath = options.statePath || path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-state.json');
   const statusTtlMs = options.statusTtlMs != null ? options.statusTtlMs : DEFAULT_STATUS_TTL_MS;
@@ -106,6 +116,7 @@ function getGitInfo(project, options = {}) {
 
   if (entry && entry.statusTimestamp && (now - entry.statusTimestamp) < statusTtlMs) {
     return {
+      vcsType: entry.vcsType || 'git',
       branch: entry.branch || '',
       dirty: entry.dirty || '',
       ahead: entry.ahead || 0,
@@ -161,6 +172,7 @@ function getGitInfo(project, options = {}) {
   const gitRepoUrl = normalizeRemoteUrl(rawRemote, branch);
 
   gitCache[project] = {
+    vcsType: 'git',
     branch,
     dirty,
     ahead,
@@ -183,11 +195,125 @@ function getGitInfo(project, options = {}) {
   state.gitCache = gitCache;
   writeStateFile(statePath, state);
 
-  return { branch, dirty, ahead, behind, gitRepoUrl, cached: false };
+  return { vcsType: 'git', branch, dirty, ahead, behind, gitRepoUrl, cached: false };
+}
+
+/**
+ * Retrieve VCS info aware of the Antigravity CLI `payload.vcs` object (`git`, `jj`, `hg`).
+ * - Skips spawning `git` outside a repository when CLI >= 1.4 explicitly omits `payload.vcs`.
+ * - Uses native `payload.vcs.branch`/`dirty` when supplied (with zero subprocess cost for non-git VCS).
+ * - Supports `jj` and `hg` badges with TTL caching.
+ */
+function getVcsInfo(project, payload = {}, options = {}) {
+  const vcs = payload && payload.vcs;
+  const cliVersion = payload && payload.version;
+
+  // On CLI v1.4+, `vcs` is omitted when the workspace is outside any VCS repository.
+  if (!vcs && isCliVersionAtLeast(cliVersion, 1, 4)) {
+    return { vcsType: '', branch: '', dirty: '', ahead: 0, behind: 0, gitRepoUrl: '', cached: false };
+  }
+
+  const vcsType = (vcs && vcs.type) ? String(vcs.type).toLowerCase() : 'git';
+
+  if (vcsType === 'git') {
+    const info = getGitInfo(project, options);
+    // If payload directly supplies branch/dirty and git binary failed/returned empty, honor payload
+    if (!info.branch && vcs && vcs.branch) {
+      return Object.assign({}, info, {
+        vcsType: 'git',
+        branch: String(vcs.branch),
+        dirty: vcs.dirty ? '*' : ''
+      });
+    }
+    return info;
+  }
+
+  // Non-git VCS (Jujutsu `jj` or Mercurial `hg`)
+  if (vcs && vcs.branch) {
+    return {
+      vcsType,
+      branch: String(vcs.branch),
+      dirty: vcs.dirty ? '*' : '',
+      ahead: 0,
+      behind: 0,
+      gitRepoUrl: '',
+      cached: false
+    };
+  }
+
+  if (!project) {
+    return { vcsType, branch: '', dirty: '', ahead: 0, behind: 0, gitRepoUrl: '', cached: false };
+  }
+
+  const statePath = options.statePath || path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-state.json');
+  const statusTtlMs = options.statusTtlMs != null ? options.statusTtlMs : DEFAULT_STATUS_TTL_MS;
+  const now = options.now != null ? options.now : Date.now();
+  const state = readStateFile(statePath);
+  const gitCache = (state.gitCache && typeof state.gitCache === 'object') ? state.gitCache : {};
+  const cacheKey = `${vcsType}:${project}`;
+  const entry = gitCache[cacheKey];
+
+  if (entry && entry.statusTimestamp && (now - entry.statusTimestamp) < statusTtlMs) {
+    return {
+      vcsType,
+      branch: entry.branch || '',
+      dirty: entry.dirty || '',
+      ahead: 0,
+      behind: 0,
+      gitRepoUrl: '',
+      cached: true
+    };
+  }
+
+  let branch = '';
+  let dirty = '';
+  try {
+    if (vcsType === 'jj') {
+      const out = execFileSync('jj', ['-R', project, 'log', '-r', '@', '--no-graph', '-T', 'bookmarks ++ "\\n" ++ change_id.shortest(6)'], {
+        timeout: 1500,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      const lines = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      branch = lines[0] || '';
+    } else if (vcsType === 'hg') {
+      branch = execFileSync('hg', ['-R', project, 'branch'], {
+        timeout: 1500,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      const statusOut = execFileSync('hg', ['-R', project, 'status'], {
+        timeout: 1500,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      dirty = statusOut ? '*' : '';
+    }
+  } catch (_) {
+    branch = '';
+    dirty = '';
+  }
+
+  gitCache[cacheKey] = {
+    vcsType,
+    branch,
+    dirty,
+    ahead: 0,
+    behind: 0,
+    gitRepoUrl: '',
+    statusTimestamp: now,
+    remoteTimestamp: now
+  };
+  state.gitCache = gitCache;
+  writeStateFile(statePath, state);
+
+  return { vcsType, branch, dirty, ahead: 0, behind: 0, gitRepoUrl: '', cached: false };
 }
 
 module.exports = {
   getGitInfo,
+  getVcsInfo,
   parsePorcelainBranchAndDirty,
-  normalizeRemoteUrl
+  normalizeRemoteUrl,
+  isCliVersionAtLeast
 };

@@ -1,6 +1,15 @@
 'use strict';
+const path = require('path');
+const os = require('os');
 const { makeLink, toFileUrl } = require('../hyperlinks');
-const { formatResetTime, formatDuration, getContextCapacity, resolveQuotaSegments, estimateCost } = require('../quota');
+const {
+  formatResetTime,
+  formatDuration,
+  getContextCapacity,
+  parseAutoCompactOverride,
+  resolveQuotaSegments,
+  resolveCost
+} = require('../quota');
 
 const ANSI_BY_NAME = {
   dim: '\x1b[2m',
@@ -72,6 +81,33 @@ function dig(obj, ...keys) {
   return cur;
 }
 
+function truncateText(text, maxLen) {
+  if (!text) return '';
+  const clean = String(text).replace(/\s+/g, ' ').trim();
+  if (clean.length <= maxLen) return clean;
+  return clean.slice(0, Math.max(1, maxLen - 1)).trimEnd() + '\u2026';
+}
+
+function shortModelElement(modelLabel) {
+  if (!modelLabel) return '';
+  const s = String(modelLabel).trim();
+  const m = s.match(/gemini\s*4\s*([a-z]+)/i);
+  if (m) return m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+  const claude = s.match(/claude\s+(opus|sonnet|haiku)(?:\s+[\d.]+)?/i);
+  if (claude) return claude[0].replace(/^claude\s+/i, '');
+  return s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
+function formatEffortLabel(effort) {
+  const e = String(effort || '').toLowerCase().trim();
+  if (e === 'xhigh') return 'XHigh';
+  if (e === 'high') return 'High';
+  if (e === 'medium') return 'Medium';
+  if (e === 'low') return 'Low';
+  if (e === 'max') return 'Max';
+  return effort ? String(effort) : '';
+}
+
 /**
  * Map payload cycle_mode or settings permission mode value to canonical mode value.
  * Supports all 4 Antigravity Shift+Tab cycle states:
@@ -117,25 +153,27 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
 
   let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
   let FAST = '\u23E9', PLAY_DOUBLE = '\u23F5\u23F5', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
-  let FULL = '\u2588', EMPTY = '\u2591';
-  let PAUSE = '\u23F8', STOP = '\u25A0';
+  let CROSS = '\u2716', FULL = '\u2588', EMPTY = '\u2591';
+  let PAUSE = '\u23F8', STOP = '\u25A0', BOLT = '\u26A1', ARROW = '\u2192';
+  let PACE_UP = '\u21E1', PACE_DOWN = '\u21E3', HOURGLASS = '\u23F3';
   let SPINNER_FRAMES = ['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'];
 
   if (noUnicode) {
     SEP = '|'; DOT = '*'; UP = '^'; DOWN = 'v';
     FAST = '>>'; PLAY_DOUBLE = '>>'; WARN = '!'; CHECK = '+'; TIMES = 'x';
-    FULL = '#'; EMPTY = '.';
-    PAUSE = '||'; STOP = '[]';
+    CROSS = 'x'; FULL = '#'; EMPTY = '.';
+    PAUSE = '||'; STOP = '[]'; BOLT = 'c:'; ARROW = '->';
+    PACE_UP = '+'; PACE_DOWN = '-'; HOURGLASS = 'Q:';
     SPINNER_FRAMES = ['|', '/', '-', '\\'];
   }
 
   let R = '\x1b[0m', B = '\x1b[1m';
   let Green = '\x1b[92m', Yellow = '\x1b[93m', Cyan = '\x1b[96m';
   let Gray = '\x1b[90m', White = '\x1b[97m', Red = '\x1b[91m';
-  let Amber = '\x1b[93m', Orange = '\x1b[38;5;208m';
+  let Amber = '\x1b[93m', Orange = '\x1b[38;5;208m', Magenta = '\x1b[95m';
 
   if (noColor) {
-    R = B = Green = Yellow = Cyan = Gray = White = Red = Amber = Orange = '';
+    R = B = Green = Yellow = Cyan = Gray = White = Red = Amber = Orange = Magenta = '';
   }
 
   const colors = cfg.colors || {};
@@ -176,19 +214,36 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   const model = (typeof j.model === 'object' && j.model !== null)
     ? (j.model.display_name || j.model.id || 'unknown model')
     : (j.model || j.model_name || 'unknown model');
+  const modelEffort = (typeof j.model === 'object' && j.model !== null && j.model.effort)
+    ? String(j.model.effort)
+    : '';
   const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || process.cwd();
   const repo = basenameAny(project);
   const cols = j.terminal_width || 120;
   const state = j.agent_state || 'idle';
+  const convId = j.conversation_id || j.session_id || '';
 
   const ctxIn = dig(j, 'context_window', 'total_input_tokens') ?? j.context_used ?? j.tokens_used ?? 0;
   const ctxOut = dig(j, 'context_window', 'total_output_tokens') ?? 0;
   const ctxSize = dig(j, 'context_window', 'context_window_size') || j.context_capacity || getContextCapacity(model);
   const rawPct = dig(j, 'context_window', 'used_percentage');
   const ctxPct = rawPct != null ? rawPct : Math.min(100, ((ctxIn + ctxOut) / Math.max(1, ctxSize)) * 100);
+  const currentInTokens = dig(j, 'context_window', 'current_usage', 'input_tokens') || 0;
+  const cacheCreateTokens = dig(j, 'context_window', 'current_usage', 'cache_creation_input_tokens') || 0;
   const cacheReadTokens = dig(j, 'context_window', 'current_usage', 'cache_read_input_tokens') || 0;
 
-  const totalCost = options.cost != null ? options.cost : estimateCost(model, ctxIn, ctxOut, cacheReadTokens);
+  // Auto-compaction override (CLI v1.5.15+ AGY_CLI_AUTO_COMPACT_OVERRIDE)
+  const rawCompactOverride = options.autoCompactOverride !== undefined
+    ? options.autoCompactOverride
+    : process.env.AGY_CLI_AUTO_COMPACT_OVERRIDE;
+  const compactThreshold = parseAutoCompactOverride(rawCompactOverride, ctxSize);
+  const usedApproxTokens = rawPct != null ? Math.round((ctxPct / 100) * ctxSize) : (ctxIn + ctxOut);
+  const compactPct = compactThreshold ? Math.min(100, (usedApproxTokens / compactThreshold) * 100) : null;
+
+  // Native cost (CLI v1.4+) with fallback to estimateCost()
+  const costInfo = options.cost != null
+    ? { totalUsd: options.cost, subagentUsd: 0, estimated: true, fromPayload: false }
+    : resolveCost(j, model, ctxIn, ctxOut, cacheReadTokens);
   const streamSpeed = options.speed != null ? options.speed : 0;
 
   // ─── LAYOUT ───────────────────────────────────────────────────────────────────
@@ -216,8 +271,35 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     if (parsed > 0) toolMax = parsed;
   }
 
-  // ─── MODEL NAME SHORTENING (tiny layout) ──────────────────────────────────────
+  // ─── MODEL NAME, EFFORT, ORCHESTRATOR & CUSTOM AGENT ──────────────────────────
   let displayModel = String(model);
+
+  // Append effort badge when payload supplies model.effort and display_name doesn't already include it
+  if (modelEffort) {
+    const effortLabel = formatEffortLabel(modelEffort);
+    if (effortLabel && !new RegExp(`\\b${effortLabel}\\b`, 'i').test(displayModel)) {
+      displayModel = `${displayModel} (${effortLabel})`;
+    }
+  }
+
+  // Orchestrator Planner -> Executor enrichment from settings.json (normal layout)
+  if (
+    layout === 'normal' &&
+    options.orchestrator &&
+    typeof options.orchestrator === 'object' &&
+    /orchestrator/i.test(displayModel) &&
+    !displayModel.includes(ARROW) &&
+    !displayModel.includes('->')
+  ) {
+    const plannerRaw = options.orchestrator.planner || options.orchestrator.plannerModel || '';
+    const executorRaw = options.orchestrator.executor || options.orchestrator.executorModel || '';
+    const plannerShort = shortModelElement(plannerRaw);
+    const executorShort = shortModelElement(executorRaw);
+    if (plannerShort && executorShort && plannerShort.toLowerCase() !== executorShort.toLowerCase()) {
+      displayModel = `Orchestrator (${plannerShort} ${ARROW} ${executorShort})`;
+    }
+  }
+
   if (layout === 'tiny') {
     displayModel = displayModel
       .replace(/^Gemini\s*/i, 'G')
@@ -233,7 +315,13 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
       });
   }
 
-  // ─── GIT & HYPERLINKS ─────────────────────────────────────────────────────────
+  const customAgentName = dig(j, 'agent', 'name');
+  const modelSegment = customAgentName
+    ? `${colorModel}${B}${displayModel}${R} ${colorGit}@${customAgentName}${R}`
+    : `${colorModel}${B}${displayModel}${R}`;
+
+  // ─── VCS (GIT / JJ / HG) & HYPERLINKS ─────────────────────────────────────────
+  const vcsType = options.vcsType || dig(j, 'vcs', 'type') || 'git';
   const branch = options.gitBranch != null ? options.gitBranch : '';
   const dirty = options.gitDirty ? '*' : '';
   const ahead = Number(options.gitAhead) || 0;
@@ -253,40 +341,104 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   const branchStr = branch
     ? (layout === 'tiny'
         ? ` ${colorLabel}(${colorGit}${branchText}${colorLabel})${R}`
-        : ` ${colorLabel}git:(${colorGit}${branchText}${colorLabel})${R}`)
+        : ` ${colorLabel}${vcsType}:(${colorGit}${branchText}${colorLabel})${R}`)
     : '';
 
   const repoText = (enableLinks && project) ? makeLink(repo, toFileUrl(project), true) : repo;
 
-  // ─── SPINNER & STATE ──────────────────────────────────────────────────────────
-  const isActive = /working|tool|running|thinking|busy/i.test(state);
+  // ─── SPINNER, AGENT STATE, QUEUED INPUT & VIM MODE ────────────────────────────
+  const stateLower = String(state || 'idle').toLowerCase();
+  const isError = stateLower === 'error';
+  const isReviewing = stateLower === 'reviewing';
+  const isActive = /working|tool|running|thinking|busy|initializing|authenticating/i.test(stateLower);
+
+  let stateColor;
   let stateGlyph;
-  if (!noSpinner && isActive) {
-    const frame = Math.floor(Date.now() / 120) % SPINNER_FRAMES.length;
-    stateGlyph = `${colorActive}${SPINNER_FRAMES[frame]}${R}`;
+  if (isError) {
+    stateColor = colorQuotaCritical;
+    stateGlyph = `${stateColor}${CROSS}${R}`;
+  } else if (isReviewing) {
+    stateColor = Amber;
+    stateGlyph = `${stateColor}${PAUSE}${R}`;
+  } else if (isActive) {
+    stateColor = colorActive;
+    if (!noSpinner) {
+      const frame = Math.floor(Date.now() / 120) % SPINNER_FRAMES.length;
+      stateGlyph = `${stateColor}${SPINNER_FRAMES[frame]}${R}`;
+    } else {
+      stateGlyph = `${stateColor}${DOT}${R}`;
+    }
   } else {
-    stateGlyph = isActive ? `${colorActive}${DOT}${R}` : `${colorSuccess}${DOT}${R}`;
+    stateColor = colorSuccess;
+    stateGlyph = `${stateColor}${DOT}${R}`;
   }
 
-  const stateColor = isActive ? colorActive : colorSuccess;
   let stateSegment = `${stateColor}${B}${stateGlyph}${R} ${stateColor}${B}${state}${R}`;
   if (j.tool_confirmation_pending === true) {
     stateSegment += ` ${Amber}${WARN} confirm${R}`;
   }
 
+  const pendingInputCount = Number(j.pending_input_count) || 0;
+  if (pendingInputCount > 0) {
+    const qText = layout === 'tiny'
+      ? `${pendingInputCount}q`
+      : `${HOURGLASS} ${pendingInputCount} queued`;
+    stateSegment += ` ${colorPermAcceptEdits}${qText}${R}`;
+  }
+
+  // Vim editor mode badge (NORMAL / INSERT / VISUAL / VISUAL LINE)
+  const rawVimMode = dig(j, 'vim', 'mode');
+  let vimSegment = '';
+  if (rawVimMode) {
+    const vm = String(rawVimMode).toUpperCase().trim();
+    const shortVm = vm === 'VISUAL LINE' ? 'V-LINE' : vm;
+    let vmColor = colorActive;
+    if (vm === 'INSERT') vmColor = colorSuccess;
+    else if (vm.startsWith('VISUAL')) vmColor = Magenta;
+    else if (vm === 'NORMAL') vmColor = colorActive;
+    vimSegment = `${vmColor}${B}${shortVm}${R}`;
+  }
+
   const SEP_PAD = ` ${colorSep}${SEP}${R} `;
   const line1Parts = [
-    `${colorModel}${B}${displayModel}${R}`,
+    modelSegment,
     `${colorRepo}${repoText}${R}${branchStr}`,
     stateSegment
   ];
+  if (vimSegment) {
+    line1Parts.push(vimSegment);
+  }
+
+  // Optional conversation ID / title badge for `agy -r <prefix>`
+  if (cfg.showConversationId === true && layout !== 'tiny') {
+    const title = j.conversation_title ? truncateText(j.conversation_title, layout === 'normal' ? 28 : 16) : '';
+    const shortId = convId ? String(convId).slice(0, 8) : '';
+    if (title && shortId) {
+      line1Parts.push(`${colorLabel}#${shortId} ${title}${R}`);
+    } else if (shortId) {
+      line1Parts.push(`${colorLabel}#${shortId}${R}`);
+    } else if (title) {
+      line1Parts.push(`${colorLabel}${title}${R}`);
+    }
+  }
 
   const showCost = cfg.showCost !== false;
   const showSpeed = cfg.showSpeed !== false;
 
+  function formatCostPart() {
+    if (!showCost || costInfo.totalUsd <= 0) return '';
+    const prefix = costInfo.estimated ? '~' : '';
+    let str = `${colorSuccess}${prefix}$${costInfo.totalUsd.toFixed(3)}${R}`;
+    if (costInfo.subagentUsd > 0 && layout === 'normal') {
+      str += ` ${colorLabel}(+$${costInfo.subagentUsd.toFixed(2)} sub)${R}`;
+    }
+    return str;
+  }
+
   if (cfg.preset === 'minimal' || cfg.preset === 'essential') {
     const extras = [];
-    if (showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
+    const costStr = formatCostPart();
+    if (costStr) extras.push(costStr);
     if (showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
     if (extras.length > 0) {
       line1Parts.push(extras.join(SEP_PAD));
@@ -294,11 +446,27 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   }
   const line1 = line1Parts.join(SEP_PAD);
 
-  // ─── LINE 2: ctx bar │ quota bars ─────────────────────────────────────────────
-  function quotaSegment(label, pct, resetSec, bLen) {
+  // ─── LINE 2: ctx bar │ quota bars / credits │ cost │ speed ────────────────────
+  function quotaSegment(seg, bLen) {
+    if (seg.isAmount) {
+      const amtCol = seg.amount < 20 ? colorQuotaLow : colorQuotaHigh;
+      return `${colorLabel}${seg.label}${R} ${amtCol}${B}${seg.amount}${R}`;
+    }
+
+    const { label, pct, resetSeconds, paceDelta } = seg;
     const col = quotaColor(pct);
-    const reset = formatResetTime(resetSec);
+    const reset = formatResetTime(resetSeconds);
     const rStr = reset ? ` ${colorLabel}${reset}${R}` : '';
+
+    let paceStr = '';
+    if (cfg.showQuotaPace === true && paceDelta != null && Math.abs(paceDelta) >= 5 && layout !== 'tiny') {
+      if (paceDelta > 0) {
+        const pCol = paceDelta >= 15 ? colorQuotaCritical : colorQuotaLow;
+        paceStr = ` ${pCol}${PACE_UP}${paceDelta}%${R}`;
+      } else {
+        paceStr = ` ${colorSuccess}${PACE_DOWN}${Math.abs(paceDelta)}%${R}`;
+      }
+    }
 
     if (pct <= 0) {
       if (bLen <= 0) {
@@ -308,31 +476,55 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     }
 
     if (bLen <= 0) {
-      return `${colorLabel}${label}${R} ${col}${pct}%${R}${rStr}`;
+      return `${colorLabel}${label}${R} ${col}${pct}%${R}${rStr}${paceStr}`;
     }
 
-    return `${colorLabel}${label}${R} ${col}${bar(pct, bLen, FULL, EMPTY)}${R} ${col}${pct}%${R}${rStr}`;
+    return `${colorLabel}${label}${R} ${col}${bar(pct, bLen, FULL, EMPTY)}${R} ${col}${pct}%${R}${rStr}${paceStr}`;
   }
 
-  const ctxCol = contextColor(ctxPct);
+  const effectiveCtxPct = compactPct != null ? Math.max(ctxPct, compactPct) : ctxPct;
+  const ctxCol = contextColor(effectiveCtxPct);
   const ctxBarStr = barLen > 0 ? ` ${ctxCol}${bar(ctxPct, barLen, FULL, EMPTY)}${R}` : '';
+
+  // Prompt cache hit ratio badge (normal layout when cache reads occurred)
+  let cacheStr = '';
+  if (
+    cfg.showCacheHit !== false &&
+    layout === 'normal' &&
+    cacheReadTokens > 0
+  ) {
+    const totalCurrentIn = currentInTokens + cacheCreateTokens + cacheReadTokens;
+    const cachePct = totalCurrentIn > 0 ? Math.min(100, Math.round((cacheReadTokens / totalCurrentIn) * 100)) : 0;
+    if (cachePct > 0) {
+      cacheStr = ` ${colorSuccess}${BOLT}${cachePct}%${R}`;
+    }
+  }
+
+  // Auto-compaction threshold hint (only when override is set and >= 70% toward compaction)
+  let compactStr = '';
+  if (compactThreshold && compactPct != null && compactPct >= 70 && layout !== 'tiny') {
+    compactStr = ` ${ctxCol}cmp ${Math.round(compactPct)}%${R}`;
+  } else if (j.exceeds_200k_tokens === true && ctxSize <= 200000 && layout !== 'tiny') {
+    compactStr = ` ${Amber}${WARN}>200k${R}`;
+  }
+
   let ctxLabel;
   if (layout === 'tiny') {
     ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${Math.round(ctxPct)}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
   } else {
     ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${Math.round(ctxPct)}%${R}`
-      + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`;
+      + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`
+      + `${cacheStr}${compactStr}`;
   }
 
   const quotaSegments = resolveQuotaSegments(j);
-  const quotaParts = quotaSegments.map(seg =>
-    quotaSegment(seg.label, seg.pct, seg.resetSeconds, barLen)
-  );
+  const quotaParts = quotaSegments.map(seg => quotaSegment(seg, barLen));
 
   const line2Parts = [ctxLabel, ...quotaParts];
   if (!cfg.preset || cfg.preset === 'full') {
     const extras = [];
-    if (showCost && totalCost > 0) extras.push(`${colorSuccess}~$${totalCost.toFixed(3)}${R}`);
+    const costStr = formatCostPart();
+    if (costStr) extras.push(costStr);
     if (showSpeed && streamSpeed > 0) extras.push(`${colorActive}${streamSpeed.toFixed(1)} t/s${R}`);
     if (extras.length > 0) {
       line2Parts.push(extras.join(SEP_PAD));
@@ -366,13 +558,25 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     line3 = `${colorLabel}--${R} ${colorSep}${SEP}${R}`;
   }
 
-  // ─── LINE 4: permission mode │ shell │ tasks │ agents [│ plan │ skills │ mcp │ duration] ─
+  // ─── LINE 4: permission mode │ shell │ tasks │ artifacts │ agents │ steps/plan │ skills │ mcp │ sandbox │ duration ─
   const shellCount = Math.min(tData.shellCount || 0, 99);
   const taskCount = Math.min(tData.taskCount != null ? tData.taskCount : (j.task_count || 0), 99);
 
+  // Structured subagents resolution (distinguish running vs completed when payload supplies status)
   let agentCount = 0;
+  let runningPayloadSubs = [];
+  let completedPayloadSubs = [];
+  let hasStructuredPayloadSubs = false;
+
   if (Array.isArray(j.subagents) && j.subagents.length > 0) {
-    agentCount = j.subagents.length;
+    hasStructuredPayloadSubs = j.subagents.some(s => s && typeof s === 'object' && s.status);
+    if (hasStructuredPayloadSubs) {
+      runningPayloadSubs = j.subagents.filter(s => s && String(s.status).toLowerCase() === 'running');
+      completedPayloadSubs = j.subagents.filter(s => s && String(s.status).toLowerCase() !== 'running');
+      agentCount = runningPayloadSubs.length;
+    } else {
+      agentCount = j.subagents.length;
+    }
   } else if (tData.activeAgents != null) {
     agentCount = tData.activeAgents;
   } else if (Array.isArray(tData.activeSubagents) && tData.activeSubagents.length > 0 && tData.agentInvoked == null) {
@@ -431,26 +635,75 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     line4 += ` ${colorSuccess}${DOT}${R} ${White}${taskCount} tasks${R}`;
   }
 
-  let agentLabel = `${agentCount} agents`;
-  if (
-    agentCount > 0 &&
-    cfg.showSubagents !== false &&
-    layout === 'normal' &&
-    Array.isArray(tData.activeSubagents) &&
-    tData.activeSubagents.length > 0
-  ) {
-    const latestSub = tData.activeSubagents[tData.activeSubagents.length - 1];
-    const subElapsed = latestSub.elapsedSeconds != null
-      ? latestSub.elapsedSeconds
-      : (latestSub.startTime ? Math.max(0, Math.floor((Date.now() - new Date(latestSub.startTime).getTime()) / 1000)) : 0);
-    const subDur = formatDuration(subElapsed);
-    const roleDetail = subDur ? `${latestSub.role} ${subDur}` : latestSub.role;
-    agentLabel += ` ${colorLabel}(${roleDetail})${R}`;
+  // Native artifact_count (with OSC 8 link to brain/<conversation_id> when available)
+  const artifactCount = Math.min(Number(j.artifact_count) || 0, 99);
+  if (cfg.showArtifacts !== false && artifactCount > 0 && layout !== 'tiny') {
+    const rawArtLabel = layout === 'normal'
+      ? `${artifactCount} ${artifactCount === 1 ? 'artifact' : 'artifacts'}`
+      : `${artifactCount} art`;
+    let artText = rawArtLabel;
+    if (enableLinks && convId) {
+      const brainDir = options.brainDir || path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain', String(convId));
+      artText = makeLink(rawArtLabel, toFileUrl(brainDir), true);
+    }
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${artText}${R}`;
+  }
+
+  // Subagent badge
+  let agentLabel;
+  if (hasStructuredPayloadSubs) {
+    if (runningPayloadSubs.length > 0) {
+      agentLabel = completedPayloadSubs.length > 0
+        ? `${runningPayloadSubs.length} active ${colorLabel}(${completedPayloadSubs.length} done)${R}`
+        : `${runningPayloadSubs.length} agents`;
+      if (cfg.showSubagents !== false && layout === 'normal') {
+        const latestRunning = runningPayloadSubs[runningPayloadSubs.length - 1];
+        const subRole = latestRunning.role || latestRunning.name || 'subagent';
+        const matchedTranscriptSub = Array.isArray(tData.activeSubagents)
+          ? tData.activeSubagents.find(s => s && s.role && s.role.toLowerCase() === String(subRole).toLowerCase())
+          : null;
+        const subDur = matchedTranscriptSub ? formatDuration(matchedTranscriptSub.elapsedSeconds) : '';
+        const roleDetail = subDur ? `${subRole} ${subDur}` : subRole;
+        agentLabel = `${runningPayloadSubs.length} agents ${colorLabel}(${roleDetail}${completedPayloadSubs.length > 0 ? `, +${completedPayloadSubs.length} done` : ''})${R}`;
+      }
+    } else {
+      agentLabel = `${completedPayloadSubs.length} agents ${colorLabel}done${R}`;
+    }
+  } else {
+    agentLabel = `${agentCount} agents`;
+    if (
+      agentCount > 0 &&
+      cfg.showSubagents !== false &&
+      layout === 'normal' &&
+      Array.isArray(tData.activeSubagents) &&
+      tData.activeSubagents.length > 0
+    ) {
+      const latestSub = tData.activeSubagents[tData.activeSubagents.length - 1];
+      const subElapsed = latestSub.elapsedSeconds != null
+        ? latestSub.elapsedSeconds
+        : (latestSub.startTime ? Math.max(0, Math.floor((Date.now() - new Date(latestSub.startTime).getTime()) / 1000)) : 0);
+      const subDur = formatDuration(subElapsed);
+      const roleDetail = subDur ? `${latestSub.role} ${subDur}` : latestSub.role;
+      agentLabel += ` ${colorLabel}(${roleDetail})${R}`;
+    }
   }
   line4 += ` ${colorSuccess}${DOT}${R} ${White}${agentLabel}${R}`;
 
-  if (cfg.showTodos !== false && tData.planProgress && tData.planProgress.total > 0 && layout !== 'tiny') {
-    line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.planProgress.done}/${tData.planProgress.total} plan${R}`;
+  // Live update_steps checklist (CLI v1.5.16+) or fallback markdown planProgress
+  if (cfg.showTodos !== false && layout !== 'tiny') {
+    const sp = tData.stepsProgress;
+    if (sp && sp.total > 0) {
+      let stepStr = `${sp.done}/${sp.total} steps`;
+      if (sp.failed > 0) {
+        stepStr += ` ${Red}${sp.failed}${CROSS}${R}`;
+      }
+      if (layout === 'normal' && sp.activeTitle && sp.done < sp.total) {
+        stepStr += ` ${colorLabel}(${truncateText(sp.activeTitle, 24)})${R}`;
+      }
+      line4 += ` ${colorSuccess}${DOT}${R} ${White}${stepStr}${R}`;
+    } else if (tData.planProgress && tData.planProgress.total > 0) {
+      line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.planProgress.done}/${tData.planProgress.total} plan${R}`;
+    }
   }
 
   if (cfg.showSkills !== false && Array.isArray(tData.skills) && tData.skills.length > 0 && layout !== 'tiny') {

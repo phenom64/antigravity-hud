@@ -1,5 +1,6 @@
 const assert = require('assert');
 const { renderHUD } = require('../src/render/lines');
+const { renderTitle } = require('../src/title');
 
 // Test 1: Standard Gemini render (full preset, 4 lines, git ahead/behind, subagents, plan, skills, mcp, duration)
 const lines = renderHUD(
@@ -66,7 +67,6 @@ assert.ok(lines[3].includes('sandbox'));
 assert.ok(lines[3].includes('14m 20s'));
 
 // Test 2: All 4 Shift+Tab cycle_mode states
-// 2a. accept-edits -> "⏵⏵ accept edits on" in light purple (#C4A7FF -> \x1b[38;2;196;167;255m)
 const acceptEditsLines = renderHUD(
   { model: 'Gemini 4 Argon (High)', cycle_mode: 'accept-edits' },
   { preset: 'full' },
@@ -76,7 +76,6 @@ const acceptEditsLines = renderHUD(
 assert.ok(acceptEditsLines[3].includes('\u23F5\u23F5 accept edits on'));
 assert.ok(acceptEditsLines[3].includes('\x1b[38;2;196;167;255m'));
 
-// 2b. plan -> "⏸ plan mode on" in teal (#2DD4BF -> \x1b[38;2;45;212;191m)
 const planLines = renderHUD(
   { model: 'Gemini 4 Argon (High)', cycle_mode: 'plan' },
   { preset: 'full' },
@@ -86,7 +85,6 @@ const planLines = renderHUD(
 assert.ok(planLines[3].includes('\u23F8 plan mode on'));
 assert.ok(planLines[3].includes('\x1b[38;2;45;212;191m'));
 
-// 2c. auto -> "⏩ auto mode on" in orange (\x1b[38;5;208m)
 const autoLines = renderHUD(
   { model: 'Gemini 4 Argon (High)', cycle_mode: 'auto' },
   { preset: 'full' },
@@ -95,7 +93,6 @@ const autoLines = renderHUD(
 );
 assert.ok(autoLines[3].includes('\u23E9 auto mode on'));
 
-// 2d. omitted cycle_mode ("") -> falls back to settings.json always-proceed ("⏩ bypass permissions (YOLO)")
 const yoloLines = renderHUD(
   {
     model: { display_name: 'Gemini 4 Argon (High)' },
@@ -116,7 +113,6 @@ assert.ok(yoloLines[1].includes('argon-wk'));
 assert.ok(!yoloLines[1].includes(' 5h ')); // 5h quota suppressed when >= 25%
 assert.ok(yoloLines[3].includes('\u23E9 bypass permissions (YOLO)'));
 
-// 2e. strict -> "■ strict mode on" (\u25A0)
 const strictLines = renderHUD(
   { model: 'Gemini 4 Argon (High)' },
   { preset: 'full' },
@@ -160,4 +156,128 @@ const essentialLines = renderHUD(
 );
 assert.strictEqual(essentialLines.length, 2);
 
-console.log('✔ Line renderer test passed');
+// Test 5: v0.6.0 features - native cost, vim, queued input, artifacts, structured subagents,
+//         live update_steps, cache hit, auto-compact override, AI credits, pace delta, custom agent, conv ID
+const v6Lines = renderHUD(
+  {
+    conversation_id: 'd7a2e523-bf96-4ba5-aa11-778b03bce6f0',
+    conversation_title: 'Upgrade antigravity-hud to v0.6.0',
+    model: { id: 'custom-gemini', display_name: 'Custom Gemini', effort: 'high' },
+    agent: { name: 'reviewer' },
+    cwd: 'C:/Users/dev/antigravity-hud',
+    agent_state: 'tool_use',
+    pending_input_count: 2,
+    vim: { mode: 'VISUAL LINE' },
+    artifact_count: 3,
+    subagents: [
+      { name: 'research', role: 'Docs Auditor', status: 'completed' },
+      { name: 'research', role: 'Codebase Researcher', status: 'running' }
+    ],
+    context_window: {
+      total_input_tokens: 400000,
+      total_output_tokens: 12000,
+      context_window_size: 1000000,
+      used_percentage: 41.2,
+      current_usage: {
+        input_tokens: 14000,
+        output_tokens: 800,
+        cache_read_input_tokens: 36000
+      }
+    },
+    quota: {
+      'gemini-5h': { remaining_fraction: 0.30, reset_in_seconds: 9000 },
+      'gemini-weekly': { remaining_fraction: 0.90, reset_in_seconds: 302400 },
+      'ai-credits': { remaining_amount: 42 }
+    },
+    cost: {
+      total_usd: 0.4213,
+      subagent_usd: 0.12,
+      estimated: false
+    },
+    terminal_width: 150
+  },
+  {
+    preset: 'full',
+    showCost: true,
+    showCacheHit: true,
+    showQuotaPace: true,
+    showArtifacts: true,
+    showConversationId: true,
+    enableLinks: true
+  },
+  {
+    shellCount: 2,
+    taskCount: 1,
+    activeSubagents: [{ role: 'Codebase Researcher', elapsedSeconds: 35 }],
+    stepsProgress: { done: 2, total: 5, inProgress: 1, skipped: 0, failed: 1, activeTitle: 'Wire renderer tests' },
+    planProgress: { done: 1, total: 2 } // should be overridden by live stepsProgress
+  },
+  {
+    vcsType: 'jj',
+    gitBranch: 'feat-v6',
+    gitDirty: true,
+    autoCompactOverride: '500K',
+    noSpinner: true
+  }
+);
+
+assert.ok(v6Lines[0].includes('Custom Gemini (High)')); // effort appended when missing
+assert.ok(v6Lines[0].includes('@reviewer')); // custom agent badge
+assert.ok(v6Lines[0].includes('jj:(')); // non-git VCS prefix
+assert.ok(v6Lines[0].includes('2 queued')); // pending_input_count
+assert.ok(v6Lines[0].includes('V-LINE')); // Vim mode
+assert.ok(v6Lines[0].includes('#d7a2e523')); // short conversation ID
+assert.ok(v6Lines[1].includes('\u26A172%')); // cache hit ratio (36k / 50k)
+assert.ok(v6Lines[1].includes('cmp 82%')); // 412k / 500k override
+assert.ok(v6Lines[1].includes('\u21E120%')); // 5h pace delta (+20%)
+assert.ok(v6Lines[1].includes('credits')); // positive remaining_amount
+assert.ok(v6Lines[1].includes('42'));
+assert.ok(v6Lines[1].includes('$0.421') && !v6Lines[1].includes('~$0.421')); // exact native cost
+assert.ok(v6Lines[1].includes('+$0.12 sub')); // subagent cost breakdown
+assert.ok(v6Lines[3].includes('3 artifacts')); // native artifact_count
+assert.ok(v6Lines[3].includes('1 agents') && v6Lines[3].includes('Codebase Researcher 35s') && v6Lines[3].includes('+1 done')); // structured subagents
+assert.ok(v6Lines[3].includes('2/5 steps') && v6Lines[3].includes('Wire renderer tests')); // live update_steps beats markdown plan
+assert.ok(!v6Lines[3].includes('1/2 plan'));
+
+// Test 6: API key mode (no quota) hides quota bars; error & reviewing states; Orchestrator planner -> executor
+const apiKeyLines = renderHUD(
+  {
+    model: { display_name: 'Orchestrator (Neon)' },
+    agent_state: 'error',
+    context_window: { total_input_tokens: 10000, total_output_tokens: 1000, context_window_size: 1000000, used_percentage: 1.1 }
+  },
+  { preset: 'essential' },
+  {},
+  { orchestrator: { planner: 'Gemini 4 Neon (High)', executor: 'Gemini 4 Hydrogen (High)' } }
+);
+assert.ok(apiKeyLines[0].includes('Orchestrator (Neon \u2192 Hydrogen)'));
+assert.ok(apiKeyLines[0].includes('\u2716') && apiKeyLines[0].includes('error'));
+assert.ok(!apiKeyLines[1].includes('5h') && !apiKeyLines[1].includes('wk'));
+
+// Test 7: Companion window title renderer (plain text, zero ANSI escape codes, single line)
+const titleConfirm = renderTitle(
+  {
+    model: { display_name: 'Gemini 4 Neon (High)' },
+    workspace: { project_dir: 'C:\\Users\\dev\\antigravity-hud' },
+    agent_state: 'working',
+    tool_confirmation_pending: true,
+    pending_input_count: 2,
+    context_window: { used_percentage: 14.6 }
+  },
+  { gitBranch: 'master', gitDirty: true }
+);
+assert.ok(!titleConfirm.includes('\x1b'));
+assert.ok(!titleConfirm.includes('\n'));
+assert.ok(titleConfirm.includes('confirm'));
+assert.ok(titleConfirm.includes('antigravity-hud (master*)'));
+assert.ok(titleConfirm.includes('G4 Neon (H)'));
+assert.ok(titleConfirm.includes('ctx 15%'));
+assert.ok(titleConfirm.includes('+2q'));
+
+const titleAscii = renderTitle(
+  { model: 'Claude Opus 5.5 (High)', cwd: '/home/dev/app', agent_state: 'idle' },
+  { noUnicode: true }
+);
+assert.strictEqual(titleAscii, '* ready | app | Opus 5.5 (H)');
+
+console.log('✔ Line & title renderer tests passed');

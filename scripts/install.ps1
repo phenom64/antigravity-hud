@@ -5,12 +5,17 @@
 
 .DESCRIPTION
   1. Checks that antigravity-hud is available on PATH (via npm install -g antigravity-hud).
-  2. Patches ~/.gemini/antigravity-cli/settings.json to set the statusLine command.
-  3. Backs up the existing settings file before patching.
+  2. Patches ~/.gemini/antigravity-cli/settings.json to set the statusLine command (preserving padding & stack_with_default).
+  3. Optionally enables live terminal window titles with -WithTitle.
+  4. Backs up the existing settings file before patching.
 
 .EXAMPLE
   .\install.ps1
+  .\install.ps1 -WithTitle
 #>
+param(
+  [switch]$WithTitle
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -56,24 +61,50 @@ if (Test-Path $settingsFile) {
   Write-Host "  [..] No existing settings.json - creating new one" -ForegroundColor Gray
 }
 
-# ── Patch statusLine ────────────────────────────────────────────────────
-$statusLine = [pscustomobject]@{
+# ── Patch statusLine (preserving padding & stack_with_default) ──────────
+$statusLineMap = [ordered]@{
   type    = "command"
   command = "antigravity-hud"
   enabled = $true
 }
 
-# Add or overwrite the statusLine property
+if ($settings.PSObject.Properties["statusLine"] -and $settings.statusLine -is [pscustomobject]) {
+  if ($settings.statusLine.PSObject.Properties["padding"]) {
+    $statusLineMap["padding"] = $settings.statusLine.padding
+  }
+  if ($settings.statusLine.PSObject.Properties["stack_with_default"]) {
+    $statusLineMap["stack_with_default"] = $settings.statusLine.stack_with_default
+  }
+}
+
+$statusLine = [pscustomobject]$statusLineMap
+
 if ($settings.PSObject.Properties["statusLine"]) {
   $settings.statusLine = $statusLine
 } else {
   $settings | Add-Member -NotePropertyName "statusLine" -NotePropertyValue $statusLine
 }
 
+if ($WithTitle) {
+  $titleObj = [pscustomobject]@{
+    type    = "command"
+    command = "antigravity-hud title"
+    enabled = $true
+  }
+  if ($settings.PSObject.Properties["title"]) {
+    $settings.title = $titleObj
+  } else {
+    $settings | Add-Member -NotePropertyName "title" -NotePropertyValue $titleObj
+  }
+}
+
 # ── Write settings ──────────────────────────────────────────────────────
 $json = $settings | ConvertTo-Json -Depth 10
 Set-Content -Path $settingsFile -Value $json -Encoding utf8
 Write-Host "  [OK] Patched statusLine in settings.json" -ForegroundColor Green
+if ($WithTitle) {
+  Write-Host "  [OK] Patched title in settings.json" -ForegroundColor Green
+}
 Write-Host ""
-Write-Host "  Done! Restart your Antigravity CLI session to see the HUD." -ForegroundColor Cyan
+Write-Host "  Done! Restart your Antigravity CLI session (or run /statusline enable) to see the HUD." -ForegroundColor Cyan
 Write-Host ""

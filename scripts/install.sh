@@ -4,10 +4,19 @@
 #
 # 1. Checks that antigravity-hud is on PATH (via npm install -g antigravity-hud)
 # 2. Patches ~/.gemini/antigravity-cli/settings.json to use the HUD
-# 3. Backs up existing settings before patching
+#    (preserving statusLine.padding and statusLine.stack_with_default)
+# 3. Pass --with-title to also configure dynamic terminal window titles
+# 4. Backs up existing settings before patching
 # ────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
+
+WITH_TITLE=0
+for arg in "$@"; do
+  if [ "$arg" = "--with-title" ]; then
+    WITH_TITLE=1
+  fi
+done
 
 SETTINGS_DIR="$HOME/.gemini/antigravity-cli"
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
@@ -37,38 +46,43 @@ if [ -f "$SETTINGS_FILE" ]; then
 fi
 
 # ── Patch settings.json ─────────────────────────────────────────────────
-# We use a simple approach: if jq is available, use it. Otherwise, python3.
-# Fallback: write a minimal settings file.
-
 patch_with_jq() {
+  local jq_expr='.statusLine = ((if (.statusLine | type) == "object" then .statusLine else {} end) + {"type":"command","command":"antigravity-hud","enabled":true})'
+  if [ "$WITH_TITLE" -eq 1 ]; then
+    jq_expr="$jq_expr | .title = {\"type\":\"command\",\"command\":\"antigravity-hud title\",\"enabled\":true}"
+  fi
   if [ -f "$SETTINGS_FILE" ]; then
-    jq '.statusLine = {"type":"command","command":"antigravity-hud","enabled":true}' \
-      "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
+    jq "$jq_expr" "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
   else
-    echo '{"statusLine":{"type":"command","command":"antigravity-hud","enabled":true}}' > "$SETTINGS_FILE"
+    echo '{}' | jq "$jq_expr" > "$SETTINGS_FILE"
   fi
 }
 
 patch_with_python() {
-  python3 -c "
+  python3 - "$SETTINGS_FILE" "$WITH_TITLE" <<'PY'
 import json, os, sys
-path = '$SETTINGS_FILE'
+path = sys.argv[1]
+with_title = sys.argv[2] == '1'
 if os.path.exists(path):
     with open(path) as f:
         data = json.load(f)
 else:
     data = {}
-data['statusLine'] = {'type': 'command', 'command': 'antigravity-hud', 'enabled': True}
+prev = data.get('statusLine')
+sl = prev if isinstance(prev, dict) else {}
+sl.update({'type': 'command', 'command': 'antigravity-hud', 'enabled': True})
+data['statusLine'] = sl
+if with_title:
+    data['title'] = {'type': 'command', 'command': 'antigravity-hud title', 'enabled': True}
 with open(path, 'w') as f:
     json.dump(data, f, indent=2)
-"
+PY
 }
 
 patch_fallback() {
   if [ -f "$SETTINGS_FILE" ]; then
-    # Crude but functional: just warn the user
     echo "  [!] Neither jq nor python3 found."
-    echo "      Add this to your settings.json manually:"
+    echo "      Run 'antigravity-hud install' instead, or add this to settings.json manually:"
     echo ""
     echo '    "statusLine": {'
     echo '      "type": "command",'
@@ -91,6 +105,9 @@ else
 fi
 
 echo "  [OK] Patched statusLine in settings.json"
+if [ "$WITH_TITLE" -eq 1 ]; then
+  echo "  [OK] Patched title in settings.json"
+fi
 echo ""
-echo "  Done! Restart your Antigravity CLI session to see the HUD."
+echo "  Done! Restart your Antigravity CLI session (or run /statusline enable) to see the HUD."
 echo ""

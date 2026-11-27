@@ -2,27 +2,29 @@
   "cwd": "C:\\Users\\dev\\Projects\\my-app",
   "session_id": "abc12345-6789-0def-abcd-ef0123456789",
   "conversation_id": "abc12345-6789-0def-abcd-ef0123456789",
+  "conversation_title": "Upgrade statusline HUD to v0.6.0",
   "transcript_path": "C:\\Users\\dev\\.gemini\\antigravity-cli\\brain\\abc12345-6789-0def-abcd-ef0123456789\\.system_generated\\logs\\transcript.jsonl",
   "model": {
-    "id": "Claude Opus 4.6 (Thinking)",
-    "display_name": "Claude Opus 4.6 (Thinking)"
+    "id": "Gemini 4 Neon (High)",
+    "display_name": "Gemini 4 Neon (High)",
+    "effort": "high"
   },
   "workspace": {
     "current_dir": "C:\\Users\\dev\\Projects\\my-app",
     "project_dir": "C:\\Users\\dev\\Projects\\my-app"
   },
-  "version": "1.0.13",
+  "version": "1.5.17",
   "context_window": {
-    "total_input_tokens": 48210,
-    "total_output_tokens": 3871,
-    "context_window_size": 250000,
-    "used_percentage": 20.8324,
-    "remaining_percentage": 79.1676,
+    "total_input_tokens": 88244,
+    "total_output_tokens": 6107,
+    "context_window_size": 1048576,
+    "used_percentage": 9.0,
+    "remaining_percentage": 91.0,
     "current_usage": {
-      "input_tokens": 8420,
-      "output_tokens": 1205,
+      "input_tokens": 43529,
+      "output_tokens": 761,
       "cache_creation_input_tokens": 0,
-      "cache_read_input_tokens": 35000
+      "cache_read_input_tokens": 30913
     }
   },
   "exceeds_200k_tokens": false,
@@ -30,36 +32,50 @@
   "quota": {
     "3p-5h": {
       "remaining_fraction": 0.72,
-      "reset_time": "2026-06-28T12:00:00Z",
+      "reset_time": "2026-12-01T12:00:00Z",
       "reset_in_seconds": 10800
     },
     "3p-weekly": {
       "remaining_fraction": 0.91,
-      "reset_time": "2026-07-05T00:00:00Z",
+      "reset_time": "2026-12-07T00:00:00Z",
       "reset_in_seconds": 561600
     },
     "gemini-5h": {
       "remaining_fraction": 0.85,
-      "reset_time": "2026-06-28T12:00:00Z",
+      "reset_time": "2026-12-01T12:00:00Z",
       "reset_in_seconds": 10800
     },
-    "gemini-argon-wtu-weekly": {
-      "remaining_fraction": 0.11,
-      "reset_time": "2026-07-05T00:00:00Z",
-      "reset_in_seconds": 584397
-    },
     "gemini-weekly": {
-      "remaining_fraction": 0.97,
-      "reset_time": "2026-07-05T00:00:00Z",
+      "remaining_fraction": 0.78,
+      "reset_time": "2026-12-07T00:00:00Z",
       "reset_in_seconds": 561600
     }
   },
   "agent_state": "tool_use",
+  "vcs": {
+    "type": "git"
+  },
+  "cycle_mode": "auto",
   "sandbox": {
     "enabled": false
   },
+  "subagents": [
+    {
+      "name": "research",
+      "role": "Codebase Researcher",
+      "status": "running"
+    }
+  ],
+  "artifact_count": 2,
   "plan_tier": "Google AI Pro",
   "email": "user@example.com",
+  "pending_input_count": 1,
   "tool_confirmation_pending": true,
-  "terminal_width": 158
+  "task_count": 1,
+  "terminal_width": 158,
+  "cost": {
+    "total_usd": 0.4213,
+    "subagent_usd": 0.04,
+    "estimated": false
+  }
 }

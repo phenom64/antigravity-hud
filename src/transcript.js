@@ -55,7 +55,7 @@ function categoriseTool(toolName) {
   if (['define_subagent', 'invoke_subagent', 'manage_subagents', 'send_message', 'swarm'].includes(name)) {
     return 'agent';
   }
-  if (['manage_task', 'schedule', 'run_workflow'].includes(name)) {
+  if (['manage_task', 'schedule', 'run_workflow', 'update_steps'].includes(name)) {
     return 'task';
   }
   if (['ask_question', 'ask_permission'].includes(name)) {
@@ -195,9 +195,51 @@ function countChecklistItems(text) {
 }
 
 /**
+ * Parse `update_steps` tool call arguments (CLI v1.5.16+) into live step checklist metrics.
+ */
+function parseUpdateStepsArgs(args) {
+  if (!args || typeof args !== 'object') return null;
+  let steps = args.steps || args.Steps;
+  if (typeof steps === 'string') {
+    try {
+      steps = JSON.parse(steps);
+    } catch (_) {
+      return null;
+    }
+  }
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+
+  let done = 0;
+  let inProgress = 0;
+  let skipped = 0;
+  let failed = 0;
+  let activeTitle = '';
+
+  for (const s of steps) {
+    if (!s || typeof s !== 'object') continue;
+    const st = String(s.status || '').toLowerCase();
+    if (st === 'done') done++;
+    else if (st === 'in_progress') {
+      inProgress++;
+      if (!activeTitle && s.title) activeTitle = String(s.title).trim();
+    } else if (st === 'skipped') skipped++;
+    else if (st === 'failed') failed++;
+  }
+
+  return {
+    done,
+    total: steps.length,
+    inProgress,
+    skipped,
+    failed,
+    activeTitle
+  };
+}
+
+/**
  * Bounded JSONL transcript reader (reads up to last 256KB).
  * Parses tool category tallies, shell/task/agent counts, active subagents (with elapsed runtime),
- * loaded skills, MCP servers, checklist/plan progress, and session duration.
+ * loaded skills, MCP servers, live `update_steps` checklists, markdown plan checklists, and session duration.
  */
 function parseTranscript(transcriptPath, initialTaskCount = 0) {
   const result = {
@@ -212,6 +254,7 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
     skills: [],
     mcpServers: [],
     planProgress: { done: 0, total: 0 },
+    stepsProgress: { done: 0, total: 0, inProgress: 0, skipped: 0, failed: 0, activeTitle: '' },
     sessionDurationSeconds: 0
   };
 
@@ -308,6 +351,13 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
           }
 
           const name = toolName.toLowerCase();
+          if (name === 'update_steps') {
+            const parsedSteps = parseUpdateStepsArgs(args);
+            if (parsedSteps) {
+              result.stepsProgress = parsedSteps;
+            }
+          }
+
           if (name === 'run_command') result.shellCount++;
           if (name === 'manage_task' || name === 'schedule' || name === 'run_workflow') result.taskCount++;
 
@@ -330,6 +380,11 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
             const action = cleanArgString(args.Action || args.action || '').toLowerCase();
             if (action === 'kill_all') {
               subagentsMap.clear();
+            } else if (action === 'kill') {
+              const ids = args.ConversationIds || args.conversationIds || [];
+              if (Array.isArray(ids)) {
+                for (const id of ids) subagentsMap.delete(cleanArgString(id));
+              }
             }
           }
         }
@@ -418,5 +473,6 @@ module.exports = {
   categoriseTool,
   resolveTranscript,
   parseTranscript,
+  parseUpdateStepsArgs,
   getSpeed
 };

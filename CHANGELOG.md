@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-27
+
+### Added
+- **Full Antigravity CLI v1.5.17 Statusline Payload Parity**:
+  - **Native USD Cost (`cost.total_usd`, `cost.subagent_usd`, `cost.estimated`)**: Uses CLI-reported cost directly (omitting `~` when `estimated === false` and showing `+$X.XX sub` when subagents incur spend), falling back to `estimateCost()` only when `cost` is absent.
+  - **Vim Mode Badge (`vim.mode`)**: Renders color-coded `NORMAL`, `INSERT`, `VISUAL`, or `V-LINE` indicator on Line 1 when Vim editor mode is enabled.
+  - **Queued Messages Counter (`pending_input_count`)**: Renders `⏳ N queued` (or `Nq` in `tiny`) next to `agent_state` on Line 1.
+  - **Artifact Counter (`artifact_count`)**: Renders `N artifacts` on Line 4 with an OSC 8 `file://` hyperlink to `~/.gemini/antigravity-cli/brain/<conversation_id>`.
+  - **Structured Subagent Status (`subagents[]`)**: Separates `running` vs `completed` subagents and combines live payload roles with transcript elapsed runtimes.
+  - **Custom Agent, `model.effort` & Orchestrator Pair**: Displays `@<agent.name>`, appends `model.effort` if not embedded in `display_name`, and enriches `Orchestrator` with configured `Planner → Executor` pairs from `settings.json`.
+  - **Optional Conversation ID / Title Badge (`showConversationId`)**: Displays `#<8-char-id>` and truncated `conversation_title` on Line 1 for quick `agy -r <prefix>` resuming.
+  - **Multi-VCS Awareness (`vcs.type`)**: Supports `git`, `jj` (Jujutsu), and `hg` (Mercurial) badges, and skips spawning `git` outside repositories on CLI v1.4+.
+- **Companion Terminal Window Title (`antigravity-hud title`)**:
+  - Added `src/title.js` and `antigravity-hud title` subcommand to output plain-text single-line titles for Antigravity CLI's `"title"` setting.
+  - Added `--with-title` flag to `antigravity-hud install`, `scripts/install.ps1`, and `scripts/install.sh`.
+- **Live Step Checklists (`update_steps`, CLI v1.5.16+)**:
+  - Parses `update_steps` tool calls in `src/transcript.js` to render live `done/total steps (active step)` and failed step counts on Line 4, taking precedence over markdown checklists.
+- **Prompt Cache Hit Ratio & Auto-Compaction Override (CLI v1.5.15+)**:
+  - Renders prompt cache hit percentage (`⚡N%`) on Line 2 from `context_window.current_usage`.
+  - Parses `AGY_CLI_AUTO_COMPACT_OVERRIDE` (`700000`, `800K`, `0.5M`, `80%`) to scale context warning colors and show `cmp N%` when approaching compaction.
+- **Quota & AI Credits Improvements**:
+  - Displays positive count-based quota buckets (`remaining_amount`, e.g., AI Credits) while hiding `0` balances and `disabled: true` buckets.
+  - Added optional quota burn pace delta (`showQuotaPace: true` -> `⇡N%` / `⇣N%`).
+
+### Fixed & Changed
+- **API-Key Mode Quota Hygiene**: Omitting or sending an empty `quota` object (such as `GEMINI_API_KEY` sessions) now hides quota gauges cleanly instead of rendering fake `100%` bars.
+- **All `agent_state` Values**: Added distinct badges for `error` (red `✖ error`), `reviewing` (amber `⏸ reviewing`), `initializing`, and `authenticating`.
+- **`install`, `uninstall`, `doctor`, `mode` & `bind-shift-tab` Alignment**:
+  - Preserves official `statusLine.padding` and `statusLine.stack_with_default` properties in `install` (plus new `--stack`, `--no-stack`, and `--padding <n>` flags).
+  - Updated `mode` to manage both `agentMode` (`default`, `accept-edits`, `plan`) and `toolPermission` (`review`, `auto`, `yolo`, `strict`).
+  - Updated `bind-shift-tab` to document native Antigravity CLI `Shift+Tab` mode cycling.
+  - Standalone `npx antigravity-hud install` runtime now also covers `--with-title` (title command points at the standalone runtime) and `uninstall` disables both `statusLine` and `title`.
+- **Reduced Disk I/O**: Gated synchronous `statusline-last.json` dumps behind `AGY_HUD_DEBUG=1` (or `config.debugDump: true`) to avoid disk writes on every 300ms statusline tick.
+
 ## [0.5.3] - 2026-11-22
 
 *Cumulative release notes from `0.4.1` to `0.5.3`.*

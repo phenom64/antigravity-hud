@@ -2,7 +2,8 @@
 'use strict';
 
 // ─── antigravity-hud.js ────────────────────────────────────────────────────────
-// Cross-platform Node.js CLI - reads JSON from stdin, outputs a 4-line ANSI HUD.
+// Cross-platform Node.js CLI - reads JSON from stdin, outputs a 4-line ANSI HUD
+// (or a single-line plain-text window title via `antigravity-hud title`).
 // Zero npm dependencies. Only Node.js built-ins.
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -14,9 +15,10 @@ const { execFileSync } = require('child_process');
 
 // ─── MODULAR SRC IMPORTS ───────────────────────────────────────────────────────
 const { loadConfig, DEFAULT_CONFIG } = require('../src/config');
-const { getGitInfo } = require('../src/git');
+const { getVcsInfo } = require('../src/git');
 const { resolveTranscript, parseTranscript, getSpeed } = require('../src/transcript');
 const { renderHUD } = require('../src/render/lines');
+const { renderTitle } = require('../src/title');
 
 // ─── CONFIGURATION LOADING ─────────────────────────────────────────────────────
 const config = loadConfig();
@@ -85,9 +87,14 @@ function formatStandaloneCommand(binPath) {
   return /\s/.test(resolved) ? `node "${resolved}"` : `node ${resolved}`;
 }
 
-function isHudCommand(command) {
+/** True if `command` runs antigravity-hud (global or standalone), optionally with a subcommand suffix like ` title`. */
+function isHudCommand(command, suffix = '') {
   if (typeof command !== 'string') return false;
-  const trimmed = command.trim();
+  let trimmed = command.trim();
+  if (suffix) {
+    if (!trimmed.endsWith(suffix)) return false;
+    trimmed = trimmed.slice(0, -suffix.length).trim();
+  }
   if (trimmed === 'antigravity-hud') return true;
   const normalized = trimmed.replace(/\\/g, '/');
   const standaloneNorm = STANDALONE_BIN.replace(/\\/g, '/');
@@ -134,14 +141,21 @@ function readSettings() {
   return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
 }
 
-function readPermissionMode() {
+function readSettingsSafe() {
   try {
-    const settings = readSettings();
-    const key = getExistingPermissionKey(settings) || 'toolPermission';
-    return settings[key] || 'request-review';
+    return readSettings();
   } catch (_) {
-    return 'request-review';
+    return {};
   }
+}
+
+function extractPermissionMode(settings) {
+  const key = getExistingPermissionKey(settings);
+  if (key && settings[key]) return settings[key];
+  if (settings && typeof settings.agentMode === 'string' && settings.agentMode) {
+    return settings.agentMode;
+  }
+  return 'request-review';
 }
 
 function writeSettings(settings) {
@@ -180,21 +194,57 @@ function dig(obj, ...keys) {
   return cur;
 }
 
+function readStdinSafe() {
+  try {
+    return fs.readFileSync(0, 'utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
 // ─── SUBCOMMAND ROUTING ────────────────────────────────────────────────────────
 const arg = process.argv[2];
 
 if (arg === 'install') {
-  runInstall();
+  runInstall(process.argv.slice(3));
 } else if (arg === 'doctor') {
   runDoctor();
 } else if (arg === 'uninstall') {
   runUninstall();
 } else if (arg === 'configure' || arg === 'setup') {
   runConfigure();
+} else if (arg === 'title') {
+  runTitleCommand(readStdinSafe());
 } else if (arg === '--help' || arg === '-h') {
   runHelp();
 } else if (arg === 'mode') {
-  const sub = process.argv[3];
+  runMode(process.argv[3]);
+} else if (arg === 'bind-shift-tab') {
+  console.log(`\n  ${Green}[OK] Shift+Tab is now natively supported by Antigravity CLI!${R}`);
+  console.log(`  Press ${Cyan}Shift+Tab${R} inside the prompt box to cycle execution modes live:`);
+  console.log(`    ${White}default${R} -> ${White}accept-edits${R} -> ${White}auto${R} -> ${White}plan${R}`);
+  console.log(`  antigravity-hud automatically reads the live ${Cyan}cycle_mode${R} from the CLI payload.`);
+  console.log(`  To change your persisted defaults in settings.json, use:`);
+  console.log(`    ${Cyan}antigravity-hud mode <default|accept-edits|plan|review|auto|yolo|strict>${R}\n`);
+  process.exit(0);
+} else {
+  // Read stdin and render HUD (the default behavior)
+  const raw = readStdinSafe();
+
+  // Optional debug dump (gated to avoid synchronous disk writes on every 300ms tick)
+  if (process.env.AGY_HUD_DEBUG === '1' || config.debugDump === true) {
+    try {
+      fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+      fs.writeFileSync(path.join(SETTINGS_DIR, 'statusline-last.json'), raw || '{}');
+    } catch (_) { /* don't crash */ }
+  }
+
+  runHud(raw);
+}
+
+// ─── SUBCOMMANDS ────────────────────────────────────────────────────────────────
+
+function runMode(sub) {
   let settings;
   try {
     settings = readSettings();
@@ -204,12 +254,20 @@ if (arg === 'install') {
   }
   const key = getExistingPermissionKey(settings) || 'toolPermission';
   const val = settings[key] || 'request-review';
+  const agentMode = typeof settings.agentMode === 'string' ? settings.agentMode : '(default: auto)';
 
-  const map = {
+  const toolMap = {
     review: 'request-review',
     auto: 'proceed-in-sandbox',
     yolo: 'always-proceed',
     strict: 'strict'
+  };
+
+  const agentModeMap = {
+    default: '',
+    'accept-edits': 'accept-edits',
+    edits: 'accept-edits',
+    plan: 'plan'
   };
 
   const getHUDLabel = (modeVal) => {
@@ -225,9 +283,10 @@ if (arg === 'install') {
   if (!sub) {
     console.log(`\n  ${B}${Cyan}antigravity-hud mode${R}`);
     console.log(`  ${Gray}====================${R}\n`);
-    console.log(`  ${White}Active Key:${R} ${key}`);
-    console.log(`  ${White}Raw Value:${R} ${val}`);
-    console.log(`  ${White}HUD Label:${R} ${getHUDLabel(val)}`);
+    console.log(`  ${White}Agent Mode (Shift+Tab default):${R} ${agentMode === '' ? 'default (ask before edits)' : agentMode}`);
+    console.log(`  ${White}Tool Permission Key:${R} ${key}`);
+    console.log(`  ${White}Tool Permission Value:${R} ${val}`);
+    console.log(`  ${White}Fallback HUD Label:${R} ${getHUDLabel(extractPermissionMode(settings))}\n`);
     process.exit(0);
   } else if (sub === 'next') {
     const cycle = ['request-review', 'proceed-in-sandbox', 'always-proceed', 'strict'];
@@ -242,17 +301,32 @@ if (arg === 'install') {
       console.error(`  ${Red}[!] Failed to cycle mode: ${err.message}${R}`);
       process.exit(1);
     }
-    console.log(`  ${Green}[OK] Cycled permission mode from '${val}' to '${nextVal}'.${R}`);
+    console.log(`  ${Green}[OK] Cycled tool permission mode from '${val}' to '${nextVal}'.${R}`);
     process.exit(0);
-  } else if (['review', 'auto', 'yolo', 'strict'].includes(sub)) {
-    const targetVal = map[sub];
-    if (val === targetVal) {
+  } else if (sub in agentModeMap) {
+    const targetVal = agentModeMap[sub];
+    try {
+      backupSettings();
+      settings.agentMode = targetVal;
+      writeSettings(settings);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to set agentMode: ${err.message}${R}`);
+      process.exit(1);
+    }
+    console.log(`  ${Green}[OK] Set startup agentMode to '${targetVal || 'default'}'.${R}`);
+    process.exit(0);
+  } else if (sub in toolMap) {
+    const targetVal = toolMap[sub];
+    if (val === targetVal && (sub !== 'auto' || settings.agentMode === 'auto')) {
       console.log(`  ${Green}[OK] Permission mode is already set to '${targetVal}'.${R}`);
       process.exit(0);
     }
     try {
       backupSettings();
       settings[key] = targetVal;
+      if (sub === 'auto') {
+        settings.agentMode = 'auto';
+      }
       writeSettings(settings);
     } catch (err) {
       console.error(`  ${Red}[!] Failed to set mode: ${err.message}${R}`);
@@ -265,50 +339,36 @@ if (arg === 'install') {
     console.log(`  Valid mode commands:`);
     console.log(`    antigravity-hud mode`);
     console.log(`    antigravity-hud mode next`);
-    console.log(`    antigravity-hud mode review`);
-    console.log(`    antigravity-hud mode auto`);
-    console.log(`    antigravity-hud mode yolo`);
-    console.log(`    antigravity-hud mode strict`);
+    console.log(`    antigravity-hud mode <default|accept-edits|plan>  (sets agentMode)`);
+    console.log(`    antigravity-hud mode <review|auto|yolo|strict>    (sets toolPermission)`);
     process.exit(1);
   }
-} else if (arg === 'bind-shift-tab') {
-  console.log(`\n  ${Yellow}[!] Shift+Tab is not supported by Antigravity yet.${R}`);
-  console.log(`  Antigravity's keybindings only support mapping key combinations to internal TUI commands.`);
-  console.log(`  They cannot trigger external shell commands or slash commands.`);
-  console.log(`  Please cycle your permission modes using:`);
-  console.log(`    ${Cyan}antigravity-hud mode next${R}\n`);
-  process.exit(0);
-} else {
-  // Read stdin and render HUD (the default behavior)
-  let raw = '';
-  try { raw = fs.readFileSync(0, 'utf8'); } catch (_) { /* empty stdin */ }
-
-  // Save raw JSON (best-effort, only in live stdin mode)
-  try {
-    const saveDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-    fs.mkdirSync(saveDir, { recursive: true });
-    fs.writeFileSync(path.join(saveDir, 'statusline-last.json'), raw || '{}');
-  } catch (_) { /* don't crash */ }
-
-  runHud(raw);
 }
 
-// ─── SUBCOMMANDS ────────────────────────────────────────────────────────────────
-
-function runInstall() {
-  const settingsDir = SETTINGS_DIR;
-  const settingsFile = SETTINGS_FILE;
+function runInstall(flags = []) {
+  const withTitle = flags.includes('--with-title');
+  const setStackTrue = flags.includes('--stack');
+  const setStackFalse = flags.includes('--no-stack');
+  let paddingOpt = null;
+  const padIdx = flags.indexOf('--padding');
+  if (padIdx !== -1 && flags[padIdx + 1] != null) {
+    const parsedPad = parseInt(flags[padIdx + 1], 10);
+    if (Number.isInteger(parsedPad) && parsedPad >= 0) {
+      paddingOpt = parsedPad;
+    }
+  }
 
   console.log(`\n  ${B}${Cyan}antigravity-hud install${R}`);
   console.log(`  ${Gray}=======================${R}\n`);
 
   try {
-    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
   } catch (err) {
     console.error(`  ${Red}[!] Failed to create settings directory:${R}`, err.message);
     process.exit(1);
   }
 
+  // Use the global binary if on PATH; otherwise (e.g. `npx antigravity-hud install`) copy a standalone runtime
   const globalBin = findOnPath();
   let targetCommand = 'antigravity-hud';
   let usedStandalone = false;
@@ -324,13 +384,14 @@ function runInstall() {
       process.exit(1);
     }
   }
+  const targetTitleCommand = `${targetCommand} title`;
 
   let settings = {};
   let exists = false;
   try {
-    if (fs.existsSync(settingsFile)) {
+    if (fs.existsSync(SETTINGS_FILE)) {
       exists = true;
-      const rawSettings = fs.readFileSync(settingsFile, 'utf8');
+      const rawSettings = fs.readFileSync(SETTINGS_FILE, 'utf8');
       settings = JSON.parse(rawSettings);
     }
   } catch (err) {
@@ -338,13 +399,46 @@ function runInstall() {
   }
 
   const prevStatusLine = settings.statusLine;
+  const prevIsObj = prevStatusLine && typeof prevStatusLine === 'object' && !Array.isArray(prevStatusLine);
 
-  const alreadyConfigured = prevStatusLine &&
-    prevStatusLine.type === 'command' &&
-    prevStatusLine.command === targetCommand &&
-    prevStatusLine.enabled === true;
+  const nextStatusLine = {
+    type: 'command',
+    command: targetCommand,
+    enabled: true
+  };
 
-  if (alreadyConfigured) {
+  // Preserve existing official statusLine properties (`padding`, `stack_with_default`)
+  if (prevIsObj && typeof prevStatusLine.padding === 'number' && prevStatusLine.padding >= 0) {
+    nextStatusLine.padding = prevStatusLine.padding;
+  }
+  if (prevIsObj && typeof prevStatusLine.stack_with_default === 'boolean') {
+    nextStatusLine.stack_with_default = prevStatusLine.stack_with_default;
+  }
+  if (paddingOpt != null) {
+    nextStatusLine.padding = paddingOpt;
+  }
+  if (setStackTrue) {
+    nextStatusLine.stack_with_default = true;
+  } else if (setStackFalse) {
+    nextStatusLine.stack_with_default = false;
+  }
+
+  const statusLineSame = prevIsObj &&
+    prevStatusLine.type === nextStatusLine.type &&
+    prevStatusLine.command === nextStatusLine.command &&
+    prevStatusLine.enabled === nextStatusLine.enabled &&
+    prevStatusLine.padding === nextStatusLine.padding &&
+    prevStatusLine.stack_with_default === nextStatusLine.stack_with_default;
+
+  const prevTitle = settings.title;
+  const titleAlreadyConfigured = !withTitle || (
+    prevTitle && typeof prevTitle === 'object' &&
+    prevTitle.type === 'command' &&
+    prevTitle.command === targetTitleCommand &&
+    prevTitle.enabled === true
+  );
+
+  if (statusLineSame && titleAlreadyConfigured) {
     if (usedStandalone) {
       console.log(`  ${Green}[OK] Runtime updated. statusLine is already configured.${R}\n`);
     } else {
@@ -362,14 +456,17 @@ function runInstall() {
     }
   }
 
-  settings.statusLine = {
-    type: 'command',
-    command: targetCommand,
-    enabled: true
-  };
+  settings.statusLine = nextStatusLine;
+  if (withTitle) {
+    settings.title = {
+      type: 'command',
+      command: targetTitleCommand,
+      enabled: true
+    };
+  }
 
   try {
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf8');
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
     console.log(`  ${Green}[OK] Patched settings.json successfully.${R}`);
   } catch (err) {
     console.error(`  ${Red}[!] Failed to write settings.json:${R}`, err.message);
@@ -377,23 +474,28 @@ function runInstall() {
   }
 
   console.log(`\n  ${White}Previous statusLine:${R}`);
-  console.log(prevStatusLine ? JSON.stringify(prevStatusLine, null, 2) : '  (None)');
+  console.log(prevStatusLine !== undefined ? JSON.stringify(prevStatusLine, null, 2) : '  (None)');
   console.log(`\n  ${White}New statusLine:${R}`);
   console.log(JSON.stringify(settings.statusLine, null, 2));
+  if (withTitle) {
+    console.log(`\n  ${White}New title:${R}`);
+    console.log(JSON.stringify(settings.title, null, 2));
+  }
 
-  console.log(`\n  ${Cyan}Done! Restart your Antigravity session to see the HUD.${R}\n`);
+  console.log(`\n  ${Cyan}Done! Restart your Antigravity session (or run /statusline enable) to see the HUD.${R}`);
+  if (!withTitle) {
+    console.log(`  ${Gray}Tip: Run 'antigravity-hud install --with-title' to also enable live terminal window titles.${R}`);
+  }
+  console.log('');
 }
 
 function runDoctor() {
   console.log(`\n  ${B}${Cyan}Antigravity HUD Diagnostics (Doctor)${R}`);
   console.log(`  ${Gray}===================================${R}\n`);
 
-  const settingsDir = SETTINGS_DIR;
-  const settingsFile = SETTINGS_FILE;
-
   console.log(`  ${White}OS:${R} ${os.type()} (${os.platform()} ${os.arch()})`);
   console.log(`  ${White}Node.js:${R} ${process.version}`);
-  console.log(`  ${White}Settings Path:${R} ${settingsFile}`);
+  console.log(`  ${White}Settings Path:${R} ${SETTINGS_FILE}`);
 
   const binLocation = findOnPath();
   const hasStandalone = fs.existsSync(STANDALONE_BIN);
@@ -406,32 +508,44 @@ function runDoctor() {
     console.log(`  ${White}PATH Check:${R} ${Yellow}[!] 'antigravity-hud' not found on PATH. Run: npx antigravity-hud install (or npm install -g antigravity-hud)${R}`);
   }
 
-  let settings = {};
-  try {
-    if (fs.existsSync(settingsFile)) {
-      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-    }
-  } catch (_) {}
-
+  const settings = readSettingsSafe();
   const permKey = getExistingPermissionKey(settings) || 'toolPermission';
   const permVal = settings[permKey] || 'request-review';
+  const agentModeVal = typeof settings.agentMode === 'string'
+    ? (settings.agentMode || 'default')
+    : 'auto (CLI default)';
+
+  console.log(`  ${White}Agent Mode (Shift+Tab):${R} ${agentModeVal}`);
   console.log(`  ${White}Tool Permission Key:${R} ${permKey}`);
   console.log(`  ${White}Tool Permission Mode:${R} ${permVal}`);
 
   const currentStatusLine = settings.statusLine;
   console.log(`\n  ${White}Current statusLine configuration:${R}`);
-  if (currentStatusLine) {
+  if (typeof currentStatusLine === 'boolean') {
+    console.log(`  ${Yellow}[!] statusLine is set to a boolean (${currentStatusLine}). Antigravity CLI requires an object; run 'antigravity-hud install' to fix.${R}`);
+  } else if (currentStatusLine && typeof currentStatusLine === 'object') {
     console.log(JSON.stringify(currentStatusLine, null, 2));
     const command = currentStatusLine.command;
-    const enabled = currentStatusLine.enabled;
-    if (isHudCommand(command) && enabled === true) {
+    const enabled = currentStatusLine.enabled !== false;
+    if (isHudCommand(command) && enabled) {
       console.log(`  ${Green}[✓] Antigravity is currently configured to use antigravity-hud!${R}`);
+    } else if (isHudCommand(command) && !enabled) {
+      console.log(`  ${Yellow}[!] antigravity-hud is configured but disabled. Run '/statusline enable' in the TUI or 'antigravity-hud install'.${R}`);
     } else {
       console.log(`  ${Yellow}[!] Antigravity statusLine is configured to run something else: '${command}' (enabled: ${enabled})${R}`);
     }
   } else {
     console.log(`  ${Gray}(None)${R}`);
     console.log(`  ${Yellow}[!] Antigravity is NOT currently configured to use antigravity-hud.${R}`);
+    console.log(`  ${Gray}Run 'antigravity-hud install' or '/statusline antigravity-hud' inside the TUI.${R}`);
+  }
+
+  const currentTitle = settings.title;
+  console.log(`\n  ${White}Current title configuration:${R}`);
+  if (currentTitle && typeof currentTitle === 'object') {
+    console.log(JSON.stringify(currentTitle, null, 2));
+  } else {
+    console.log(`  ${Gray}(None - optional: run 'antigravity-hud install --with-title' to enable dynamic window titles)${R}`);
   }
 
   const samplePath = path.join(__dirname, '..', 'docs', 'payload-examples', 'statusline-last.example.json');
@@ -441,6 +555,8 @@ function runDoctor() {
       const sampleRaw = fs.readFileSync(samplePath, 'utf8');
       console.log(`  ${Gray}--- Sample HUD Render Output ---${R}`);
       runHud(sampleRaw);
+      console.log(`  ${Gray}--- Sample Window Title Output ---${R}`);
+      runTitleCommand(sampleRaw);
       console.log(`  ${Gray}--------------------------------${R}`);
       console.log(`  ${Green}[OK] Sample render complete.${R}\n`);
     } catch (err) {
@@ -455,15 +571,12 @@ function runUninstall() {
   console.log(`\n  ${B}${Cyan}antigravity-hud uninstall${R}`);
   console.log(`  ${Gray}=========================${R}\n`);
 
-  const settingsDir = SETTINGS_DIR;
-  const settingsFile = SETTINGS_FILE;
-
   let settings = {};
   let exists = false;
   try {
-    if (fs.existsSync(settingsFile)) {
+    if (fs.existsSync(SETTINGS_FILE)) {
       exists = true;
-      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+      settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
     }
   } catch (err) {
     console.error(`  ${Red}[!] Failed to read settings.json:${R}`, err.message);
@@ -475,21 +588,32 @@ function runUninstall() {
     process.exit(0);
   }
 
+  let modified = false;
   const currentStatusLine = settings.statusLine;
-  const isTarget = currentStatusLine && isHudCommand(currentStatusLine.command);
-
-  if (!isTarget) {
-    console.log(`  ${Yellow}[!] The statusLine command is not currently configured to use 'antigravity-hud'.${R}`);
-    console.log(`  No changes made to settings.json.`);
-  } else {
+  if (currentStatusLine && typeof currentStatusLine === 'object' && isHudCommand(currentStatusLine.command)) {
     settings.statusLine.enabled = false;
+    modified = true;
+    console.log(`  ${Green}[OK] Disabled statusLine in settings.json.${R}`);
+  } else {
+    console.log(`  ${Yellow}[!] The statusLine command is not currently configured to use 'antigravity-hud'.${R}`);
+  }
+
+  const currentTitle = settings.title;
+  if (currentTitle && typeof currentTitle === 'object' && isHudCommand(currentTitle.command, ' title')) {
+    settings.title.enabled = false;
+    modified = true;
+    console.log(`  ${Green}[OK] Disabled title in settings.json.${R}`);
+  }
+
+  if (modified) {
     try {
-      fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf8');
-      console.log(`  ${Green}[OK] Disabled statusLine in settings.json.${R}`);
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
     } catch (err) {
       console.error(`  ${Red}[!] Failed to update settings.json:${R}`, err.message);
       process.exit(1);
     }
+  } else {
+    console.log(`  No changes made to settings.json.`);
   }
 
   if (fs.existsSync(STANDALONE_DIR)) {
@@ -502,7 +626,7 @@ function runUninstall() {
   }
 
   try {
-    const files = fs.readdirSync(settingsDir);
+    const files = fs.readdirSync(SETTINGS_DIR);
     const backups = files.filter(f => f.startsWith('settings.json.backup-antigravity-hud-'));
     if (backups.length > 0) {
       backups.sort();
@@ -513,9 +637,9 @@ function runUninstall() {
       }
       console.log(`\n  To restore your settings from the newest backup, run:`);
       if (os.platform() === 'win32') {
-        console.log(`    ${Cyan}Copy-Item "${path.join(settingsDir, newestBackup)}" "${settingsFile}" -Force${R}`);
+        console.log(`    ${Cyan}Copy-Item "${path.join(SETTINGS_DIR, newestBackup)}" "${SETTINGS_FILE}" -Force${R}`);
       } else {
-        console.log(`    ${Cyan}cp "${path.join(settingsDir, newestBackup)}" "${settingsFile}"${R}`);
+        console.log(`    ${Cyan}cp "${path.join(SETTINGS_DIR, newestBackup)}" "${SETTINGS_FILE}"${R}`);
       }
     }
   } catch (_) {}
@@ -538,7 +662,7 @@ async function runConfigure() {
   console.log(`\n  ${B}${Cyan}antigravity-hud configuration wizard${R}`);
   console.log(`  ${Gray}====================================${R}\n`);
 
-  const confPath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-hud-config.json');
+  const confPath = path.join(SETTINGS_DIR, 'antigravity-hud-config.json');
   let current = {};
   try {
     if (fs.existsSync(confPath)) {
@@ -568,17 +692,37 @@ async function runConfigure() {
   const speedAns = await askQuestion(`  Enable token generation speed (tok/s)? (y/n) [current: ${curSpeed}]: `);
   const showSpeed = speedAns ? (speedAns.toLowerCase() === 'y') : (current.showSpeed !== false);
 
-  // 4. Colors
+  // 4. Cache hit ratio
+  const curCache = current.showCacheHit !== false ? 'y' : 'n';
+  const cacheAns = await askQuestion(`  Show prompt cache hit ratio (⚡N%) on Line 2? (y/n) [current: ${curCache}]: `);
+  const showCacheHit = cacheAns ? (cacheAns.toLowerCase() === 'y') : (current.showCacheHit !== false);
+
+  // 5. Quota pace delta
+  const curPace = current.showQuotaPace === true ? 'y' : 'n';
+  const paceAns = await askQuestion(`  Show quota burn pace delta (⇡N% / ⇣N%)? (y/n) [current: ${curPace}]: `);
+  const showQuotaPace = paceAns ? (paceAns.toLowerCase() === 'y') : (current.showQuotaPace === true);
+
+  // 6. Artifacts
+  const curArt = current.showArtifacts !== false ? 'y' : 'n';
+  const artAns = await askQuestion(`  Show artifact count on Line 4? (y/n) [current: ${curArt}]: `);
+  const showArtifacts = artAns ? (artAns.toLowerCase() === 'y') : (current.showArtifacts !== false);
+
+  // 7. Short conversation ID / title
+  const curConv = current.showConversationId === true ? 'y' : 'n';
+  const convAns = await askQuestion(`  Show short conversation ID / title on Line 1 (for agy -r)? (y/n) [current: ${curConv}]: `);
+  const showConversationId = convAns ? (convAns.toLowerCase() === 'y') : (current.showConversationId === true);
+
+  // 8. Colors
   const curColor = current.colorMode !== false ? 'y' : 'n';
   const colorAns = await askQuestion(`  Enable ANSI colors? (y/n) [current: ${curColor}]: `);
   const colorMode = colorAns ? (colorAns.toLowerCase() === 'y') : (current.colorMode !== false);
 
-  // 5. Unicode
+  // 9. Unicode
   const curUnicode = current.unicodeMode !== false ? 'y' : 'n';
   const unicodeAns = await askQuestion(`  Use Unicode glyphs (reverts to ASCII if disabled)? (y/n) [current: ${curUnicode}]: `);
   const unicodeMode = unicodeAns ? (unicodeAns.toLowerCase() === 'y') : (current.unicodeMode !== false);
 
-  // 6. Hyperlinks
+  // 10. Hyperlinks
   const curLinks = current.enableLinks !== false ? 'y' : 'n';
   const linksAns = await askQuestion(`  Enable clickable OSC 8 terminal hyperlinks? (y/n) [current: ${curLinks}]: `);
   const enableLinks = linksAns ? (linksAns.toLowerCase() === 'y') : (current.enableLinks !== false);
@@ -587,6 +731,10 @@ async function runConfigure() {
     preset,
     showCost,
     showSpeed,
+    showCacheHit,
+    showQuotaPace,
+    showArtifacts,
+    showConversationId,
     enableLinks,
     colorMode,
     unicodeMode,
@@ -609,18 +757,35 @@ function runHelp() {
 
   Usage:
     ${White}antigravity-hud${R}                Read statusline JSON from stdin and render the HUD (default)
+    ${White}antigravity-hud title${R}          Read statusline JSON from stdin and print a plain-text window title
     ${White}antigravity-hud install${R}        Configure Antigravity CLI settings to use this HUD
+                                   Flags: --with-title, --stack, --no-stack, --padding <n>
     ${White}antigravity-hud configure${R}      Open the interactive configuration wizard
-    ${White}antigravity-hud doctor${R}         Check install status and run a sample render test
-    ${White}antigravity-hud uninstall${R}      Remove or disable the HUD configuration
-    ${White}antigravity-hud mode${R}           Show current Antigravity tool permission mode
-    ${White}antigravity-hud mode next${R}      Cycle permission modes
-    ${White}antigravity-hud mode <mode>${R}    Set mode to review, auto, yolo, or strict
-    ${White}antigravity-hud bind-shift-tab${R} Explain Shift+Tab keybinding limitation
+    ${White}antigravity-hud doctor${R}         Check install status and run sample HUD & title render tests
+    ${White}antigravity-hud uninstall${R}      Disable HUD (and title) configuration in settings.json
+    ${White}antigravity-hud mode${R}           Show current Antigravity agentMode & toolPermission
+    ${White}antigravity-hud mode next${R}      Cycle toolPermission modes
+    ${White}antigravity-hud mode <mode>${R}    Set agentMode (default|accept-edits|plan) or toolPermission (review|auto|yolo|strict)
 
   Options:
     -h, --help                     Show this help screen
 `);
+}
+
+// ─── TITLE RENDER CORE ─────────────────────────────────────────────────────────
+
+function runTitleCommand(raw) {
+  let j = {};
+  try { j = JSON.parse(raw); } catch (_) { /* empty/bad JSON */ }
+
+  const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || '';
+  const vcsInfo = project ? getVcsInfo(project, j) : { branch: '', dirty: '' };
+  const title = renderTitle(j, {
+    gitBranch: vcsInfo.branch,
+    gitDirty: Boolean(vcsInfo.dirty),
+    noUnicode: process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false
+  });
+  process.stdout.write(title + '\n');
 }
 
 // ─── HUD RENDER CORE ───────────────────────────────────────────────────────────
@@ -633,22 +798,26 @@ function runHud(raw) {
   const ctxOut = dig(j, 'context_window', 'total_output_tokens') || 0;
   const convId = j.conversation_id || j.session_id || null;
 
-  const cachePath = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'speed-cache.json');
+  const cachePath = path.join(SETTINGS_DIR, 'speed-cache.json');
   const streamSpeed = getSpeed(ctxOut, cachePath, convId);
 
-  const { branch, dirty, ahead, behind, gitRepoUrl } = getGitInfo(project);
+  const vcsInfo = getVcsInfo(project, j);
   const tPath = resolveTranscript(j);
   const transcriptData = parseTranscript(tPath, j.task_count || 0);
-  const permMode = readPermissionMode();
+  const settings = readSettingsSafe();
+  const permMode = extractPermissionMode(settings);
+  const orchestrator = (settings && typeof settings.orchestrator === 'object') ? settings.orchestrator : null;
 
   const lines = renderHUD(j, config, transcriptData, {
-    gitBranch: branch,
-    gitDirty: Boolean(dirty),
-    gitAhead: ahead,
-    gitBehind: behind,
-    gitRepoUrl,
+    vcsType: vcsInfo.vcsType,
+    gitBranch: vcsInfo.branch,
+    gitDirty: Boolean(vcsInfo.dirty),
+    gitAhead: vcsInfo.ahead,
+    gitBehind: vcsInfo.behind,
+    gitRepoUrl: vcsInfo.gitRepoUrl,
     speed: streamSpeed,
     permissionMode: permMode,
+    orchestrator,
     transcriptPath: tPath
   });
 

@@ -6,13 +6,17 @@ const {
   formatResetTime,
   formatDuration,
   getContextCapacity,
+  parseAutoCompactOverride,
+  computePaceDelta,
   resolveQuotaSegments,
   resolveResetSeconds,
   quotaPct,
-  estimateCost
+  estimateCost,
+  resolveCost
 } = require('../src/quota');
 const {
   parseTranscript,
+  parseUpdateStepsArgs,
   resolveTranscript,
   getSpeed,
   categoriseTool
@@ -20,28 +24,41 @@ const {
 const {
   parsePorcelainBranchAndDirty,
   normalizeRemoteUrl,
-  getGitInfo
+  getGitInfo,
+  getVcsInfo,
+  isCliVersionAtLeast
 } = require('../src/git');
 
 assert.strictEqual(formatResetTime(6120), '1h 42m');
 assert.strictEqual(formatResetTime(900), '15m');
+assert.strictEqual(formatResetTime(30), '<1m');
 
 assert.strictEqual(formatDuration(42), '42s');
 assert.strictEqual(formatDuration(860), '14m 20s');
 assert.strictEqual(formatDuration(4320), '1h 12m');
 
-// Context capacities (including full Gemini 4 element family)
+// Context capacities (including full Gemini 4 element family & Orchestrator)
 assert.strictEqual(getContextCapacity('Gemini 4 Argon'), 1000000);
 assert.strictEqual(getContextCapacity('gemini-4-argon'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 4 Neon (XHigh)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 4 Carbon (High)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 4 Hydrogen (Orchestrator)'), 1000000);
+assert.strictEqual(getContextCapacity('Orchestrator (Neon)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.5 Flash'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.8 Flash (High)'), 1000000);
 assert.strictEqual(getContextCapacity('Gemini 3.0 Pro'), 2000000);
 assert.strictEqual(getContextCapacity('Claude Opus 4.6'), 200000);
 
-// Pricing & cache discount
+// Auto-compaction threshold parser (CLI v1.5.15+ AGY_CLI_AUTO_COMPACT_OVERRIDE)
+assert.strictEqual(parseAutoCompactOverride('700000', 1000000), 700000);
+assert.strictEqual(parseAutoCompactOverride('800K', 1000000), 800000);
+assert.strictEqual(parseAutoCompactOverride('0.5M', 1000000), 500000);
+assert.strictEqual(parseAutoCompactOverride('80%', 1000000), 800000);
+assert.strictEqual(parseAutoCompactOverride('2M', 1000000), 1000000); // clamped to ctxSize
+assert.strictEqual(parseAutoCompactOverride('', 1000000), null);
+assert.strictEqual(parseAutoCompactOverride('bad', 1000000), null);
+
+// Pricing & cache discount + native payload cost resolution
 assert.strictEqual(estimateCost('Gemini 3.8 Flash (High)', 1000000, 0), 0.075);
 assert.strictEqual(estimateCost('Gemini 4 Argon', 1000000, 0, 0), 1.25);
 assert.strictEqual(estimateCost('Gemini 4 Neon (XHigh)', 1000000, 0, 0), 1.25);
@@ -50,13 +67,54 @@ assert.strictEqual(estimateCost('Gemini 4 Hydrogen (Low)', 1000000, 0, 0), 0.15)
 // 800k cached (at 25% of 1.25 = 0.25) + 200k uncached (0.25) = 0.50
 assert.strictEqual(Number(estimateCost('Gemini 4 Argon', 1000000, 0, 800000).toFixed(4)), 0.5);
 
-// Quota percentage helper & live reset_time wall-clock countdown
+const nativeCost = resolveCost(
+  { cost: { total_usd: 0.4213, subagent_usd: 0.12, estimated: false } },
+  'Gemini 4 Neon (High)',
+  100000,
+  5000
+);
+assert.strictEqual(nativeCost.totalUsd, 0.4213);
+assert.strictEqual(nativeCost.subagentUsd, 0.12);
+assert.strictEqual(nativeCost.estimated, false);
+assert.strictEqual(nativeCost.fromPayload, true);
+
+const fallbackCost = resolveCost({}, 'Gemini 4 Neon (High)', 1000000, 0, 0);
+assert.strictEqual(fallbackCost.totalUsd, 1.25);
+assert.strictEqual(fallbackCost.estimated, true);
+assert.strictEqual(fallbackCost.fromPayload, false);
+
+// Quota percentage helper, live reset_time wall-clock countdown & pace delta
 assert.strictEqual(quotaPct({ remaining_fraction: 0.85 }), 85);
 assert.strictEqual(quotaPct({ remaining_fraction: 0 }), 0);
 assert.strictEqual(quotaPct(null), 100);
 const fixedNow = Date.parse('2026-11-22T12:00:00Z');
 assert.strictEqual(resolveResetSeconds({ reset_time: '2026-11-22T13:00:00Z', reset_in_seconds: 99999 }, fixedNow), 3600);
 assert.strictEqual(quotaPct({ remaining_fraction: 0.12, reset_time: '2026-11-22T11:59:00Z' }, fixedNow), 100);
+// Halfway through 5h window (9000s remaining), 30% remaining (70% used vs 50% expected) -> +20% ahead of pace
+assert.strictEqual(computePaceDelta(30, 9000, 18000), 20);
+// Halfway through 5h window, 80% remaining (20% used vs 50% expected) -> -30% under pace
+assert.strictEqual(computePaceDelta(80, 9000, 18000), -30);
+assert.strictEqual(computePaceDelta(90, 0, 18000), null);
+
+// Empty / omitted quota (GEMINI_API_KEY mode) -> returns [] instead of fake 100% bars
+assert.deepStrictEqual(resolveQuotaSegments({ model: { display_name: 'Gemini 4 Neon (High)' } }), []);
+assert.deepStrictEqual(resolveQuotaSegments({ model: { display_name: 'Gemini 4 Neon (High)' }, quota: {} }), []);
+
+// Disabled buckets skipped & positive remaining_amount (AI credits) surfaced while 0 credits stay hidden
+const creditsSegs = resolveQuotaSegments({
+  model: { display_name: 'Gemini 4 Neon (High)' },
+  quota: {
+    'gemini-5h': { remaining_fraction: 0.8, reset_in_seconds: 9000 },
+    'gemini-weekly': { remaining_fraction: 0.9, reset_in_seconds: 300000, disabled: true },
+    'ai-credits': { remaining_amount: 42 },
+    'empty-credits': { remaining_amount: 0 }
+  }
+});
+assert.strictEqual(creditsSegs.length, 2);
+assert.strictEqual(creditsSegs[0].id, '5h');
+assert.strictEqual(creditsSegs[1].isAmount, true);
+assert.strictEqual(creditsSegs[1].label, 'credits');
+assert.strictEqual(creditsSegs[1].amount, 42);
 
 // Test 1: Gemini 4 Argon on Pro plan -> ONLY argon-wk segment when 5h is healthy
 const argonProPayload = {
@@ -157,14 +215,38 @@ const o3Segs = resolveQuotaSegments({
 });
 assert.strictEqual(o3Segs[0].pct, 40);
 
-// Test 5: Tool categorisation for new agy v1.5+ tools
+// Test 5: Tool categorisation for agy v1.5.16+ tools (including update_steps)
 assert.strictEqual(categoriseTool('swarm'), 'agent');
 assert.strictEqual(categoriseTool('run_workflow'), 'task');
+assert.strictEqual(categoriseTool('update_steps'), 'task');
 assert.strictEqual(categoriseTool('read_file'), 'read');
 assert.strictEqual(categoriseTool('run_command'), 'bash');
 assert.strictEqual(categoriseTool('mcp__syncloudos__ping'), 'mcp');
 
-// Test 6: Transcript resolution, skills/MCP/checklist/subagent parsing & speed cache invalidation
+// Test 5b: parseUpdateStepsArgs (direct array and JSON-stringified)
+const parsedSteps = parseUpdateStepsArgs({
+  steps: [
+    { title: 'Inspect repo', status: 'done' },
+    { title: 'Upgrade renderer', status: 'in_progress' },
+    { title: 'Run tests', status: 'pending' },
+    { title: 'Legacy cleanup', status: 'skipped' }
+  ]
+});
+assert.deepStrictEqual(parsedSteps, {
+  done: 1,
+  total: 4,
+  inProgress: 1,
+  skipped: 1,
+  failed: 0,
+  activeTitle: 'Upgrade renderer'
+});
+const parsedStepsJson = parseUpdateStepsArgs({
+  steps: JSON.stringify([{ title: 'Step A', status: 'done' }, { title: 'Step B', status: 'failed' }])
+});
+assert.strictEqual(parsedStepsJson.done, 1);
+assert.strictEqual(parsedStepsJson.failed, 1);
+
+// Test 6: Transcript resolution, skills/MCP/update_steps/checklist/subagent parsing & speed cache invalidation
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-hud-test-'));
 try {
   const statePath = path.join(tmpDir, 'antigravity-hud-state.json');
@@ -190,7 +272,17 @@ try {
         type: 'PLANNER_RESPONSE',
         tool_calls: [
           { name: 'run_command', args: {} },
-          { name: 'invoke_subagent', args: { Role: '"Codebase Researcher"', TypeName: '"research"' } }
+          { name: 'invoke_subagent', args: { Role: '"Codebase Researcher"', TypeName: '"research"' } },
+          {
+            name: 'update_steps',
+            args: {
+              steps: [
+                { title: 'Audit CLI docs', status: 'done' },
+                { title: 'Build v0.6.0', status: 'in_progress' },
+                { title: 'Run tests', status: 'pending' }
+              ]
+            }
+          }
         ]
       })
     ].join('\n') + '\n',
@@ -204,7 +296,7 @@ try {
     transcriptMtime: Date.now()
   }), 'utf8');
 
-  // Payload from agy v1.5.14 with .gemini/antigravity/brain (missing -cli) and conv-new
+  // Payload from agy v1.5.14+ with .gemini/antigravity/brain (missing -cli) and conv-new
   const nonCliPayloadPath = path.join(tmpDir, '.gemini', 'antigravity', 'brain', 'conv-new', '.system_generated', 'logs', 'transcript.jsonl');
   const resolved = resolveTranscript(
     { conversation_id: 'conv-new', transcript_path: nonCliPayloadPath },
@@ -217,11 +309,15 @@ try {
   assert.strictEqual(parsed.toolCounts.agent, 1);
   assert.strictEqual(parsed.toolCounts.read, 1);
   assert.strictEqual(parsed.toolCounts.mcp, 1);
+  assert.strictEqual(parsed.toolCounts.task, 1);
   assert.strictEqual(parsed.shellCount, 1);
   assert.strictEqual(parsed.agentInvoked, 1);
   assert.deepStrictEqual(parsed.skills, ['improve']);
   assert.deepStrictEqual(parsed.mcpServers, ['syncloudos']);
   assert.deepStrictEqual(parsed.planProgress, { done: 2, total: 3 });
+  assert.strictEqual(parsed.stepsProgress.done, 1);
+  assert.strictEqual(parsed.stepsProgress.total, 3);
+  assert.strictEqual(parsed.stepsProgress.activeTitle, 'Build v0.6.0');
   assert.strictEqual(parsed.activeSubagents.length, 1);
   assert.strictEqual(parsed.activeSubagents[0].role, 'Codebase Researcher');
   assert.strictEqual(parsed.sessionDurationSeconds, 60);
@@ -237,7 +333,7 @@ try {
   const speedOnSwitch = getSpeed(2500, speedCachePath, 'conv-new');
   assert.strictEqual(speedOnSwitch, 0);
 
-  // Git porcelain parser (including ahead / behind) & TTL cache
+  // Git porcelain parser (including ahead / behind) & TTL cache & VCS awareness
   const cleanGit = parsePorcelainBranchAndDirty('## main...origin/main\n');
   assert.strictEqual(cleanGit.branch, 'main');
   assert.strictEqual(cleanGit.dirty, '');
@@ -259,11 +355,26 @@ try {
     'https://github.com/phenom64/antigravity-hud/tree/master'
   );
 
+  // Version check helper & getVcsInfo skipping git outside repos on CLI >= 1.4
+  assert.strictEqual(isCliVersionAtLeast('1.5.17', 1, 4), true);
+  assert.strictEqual(isCliVersionAtLeast('1.4.0', 1, 4), true);
+  assert.strictEqual(isCliVersionAtLeast('1.3.9', 1, 4), false);
+
+  const noRepoVcs = getVcsInfo('/not/a/repo', { version: '1.5.17' }, { statePath });
+  assert.strictEqual(noRepoVcs.vcsType, '');
+  assert.strictEqual(noRepoVcs.branch, '');
+
+  const jjVcs = getVcsInfo('/fake/jj', { version: '1.5.17', vcs: { type: 'jj', branch: 'my-bookmark', dirty: true } }, { statePath });
+  assert.strictEqual(jjVcs.vcsType, 'jj');
+  assert.strictEqual(jjVcs.branch, 'my-bookmark');
+  assert.strictEqual(jjVcs.dirty, '*');
+
   // Seed gitCache in statePath and verify cache hit
   const now = Date.now();
   fs.writeFileSync(statePath, JSON.stringify({
     gitCache: {
       '/fake/repo': {
+        vcsType: 'git',
         branch: 'cached-branch',
         dirty: '*',
         ahead: 3,
@@ -283,4 +394,4 @@ try {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
-console.log('✔ Parser & quota test passed');
+console.log('✔ Parser, quota & VCS tests passed');
