@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-11-27
+
+### Fixed
+- **Windows Stability & Zero-Crash Guarantees (`exit status 1`)**:
+  - Replaced unbounded recursive `findFiles()` brain directory scanning in `src/transcript.js` with direct `<brainDir>/<convId>/.system_generated/logs/transcript.jsonl` lookups so cold-disk or idle/new sessions never stall walking `scratch/` folders.
+  - Skipped redundant `antigravity-hud-state.json` writes when the cached transcript path is unchanged, and switched state/speed cache writes in `src/transcript.js` and `src/git.js` to atomic temp-file + rename writes to eliminate Windows `EBUSY` races when `statusLine` and `title` run concurrently.
+  - Made `antigravity-hud title` prefer the existing VCS cache (`preferCacheOnly: true`) so it never competes with `statusLine` to spawn `git` or write state files.
+  - Added `EPIPE` broken-pipe handlers and top-level `try/catch` guards around `runHud()` and `runTitleCommand()` so canceled or unexpected ticks never exit with status 1.
+  - On Windows, `antigravity-hud install` now invokes `node <short-path-to-antigravity-hud.js>` directly instead of npm's `.cmd` shim (eliminating extra `cmd.exe` overhead and `title %COMSPEC%` window-title clobbering).
+
 ## [0.6.0] - 2026-11-27
 
 ### Added

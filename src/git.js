@@ -83,10 +83,17 @@ function readStateFile(statePath) {
 }
 
 function writeStateFile(statePath, state) {
+  let tmpPath = '';
   try {
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
-  } catch (_) {}
+    tmpPath = `${statePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf8');
+    fs.renameSync(tmpPath, statePath);
+  } catch (_) {
+    try {
+      if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch (_) {}
+  }
 }
 
 /** Compare semver-like CLI version strings (returns true if version >= targetMajor.targetMinor). */
@@ -115,6 +122,19 @@ function getGitInfo(project, options = {}) {
   const entry = gitCache[project];
 
   if (entry && entry.statusTimestamp && (now - entry.statusTimestamp) < statusTtlMs) {
+    return {
+      vcsType: entry.vcsType || 'git',
+      branch: entry.branch || '',
+      dirty: entry.dirty || '',
+      ahead: entry.ahead || 0,
+      behind: entry.behind || 0,
+      gitRepoUrl: entry.gitRepoUrl || '',
+      cached: true
+    };
+  }
+
+  // Optional fast read-only mode (used by `antigravity-hud title` so it never contends with statusLine)
+  if (options.preferCacheOnly && entry) {
     return {
       vcsType: entry.vcsType || 'git',
       branch: entry.branch || '',

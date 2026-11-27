@@ -20,6 +20,16 @@ const { resolveTranscript, parseTranscript, getSpeed } = require('../src/transcr
 const { renderHUD } = require('../src/render/lines');
 const { renderTitle } = require('../src/title');
 
+// ─── EPIPE / BROKEN-PIPE SAFETY ────────────────────────────────────────────────
+// Antigravity CLI may cancel an in-flight statusline/title tick when a newer state
+// arrives; exit cleanly (code 0) instead of crashing with EPIPE / exit status 1.
+if (process.stdout && typeof process.stdout.on === 'function') {
+  process.stdout.on('error', () => process.exit(0));
+}
+if (process.stderr && typeof process.stderr.on === 'function') {
+  process.stderr.on('error', () => process.exit(0));
+}
+
 // ─── CONFIGURATION LOADING ─────────────────────────────────────────────────────
 const config = loadConfig();
 
@@ -382,6 +392,11 @@ function runInstall(flags = []) {
     } catch (err) {
       console.error(`  ${Red}[!] Failed to install standalone runtime:${R}`, err.message);
       process.exit(1);
+    }
+  } else if (os.platform() === 'win32') {
+    const globalJs = path.join(path.dirname(globalBin), 'node_modules', 'antigravity-hud', 'bin', 'antigravity-hud.js');
+    if (fs.existsSync(globalJs)) {
+      targetCommand = formatStandaloneCommand(globalJs);
     }
   }
   const targetTitleCommand = `${targetCommand} title`;
@@ -775,51 +790,61 @@ function runHelp() {
 // ─── TITLE RENDER CORE ─────────────────────────────────────────────────────────
 
 function runTitleCommand(raw) {
-  let j = {};
-  try { j = JSON.parse(raw); } catch (_) { /* empty/bad JSON */ }
+  try {
+    let j = {};
+    try { j = JSON.parse(raw); } catch (_) { /* empty/bad JSON */ }
 
-  const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || '';
-  const vcsInfo = project ? getVcsInfo(project, j) : { branch: '', dirty: '' };
-  const title = renderTitle(j, {
-    gitBranch: vcsInfo.branch,
-    gitDirty: Boolean(vcsInfo.dirty),
-    noUnicode: process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false
-  });
-  process.stdout.write(title + '\n');
+    const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || '';
+    const vcsInfo = project
+      ? getVcsInfo(project, j, { preferCacheOnly: true })
+      : { branch: '', dirty: '' };
+    const title = renderTitle(j, {
+      gitBranch: vcsInfo.branch,
+      gitDirty: Boolean(vcsInfo.dirty),
+      noUnicode: process.env.AGY_HUD_NO_UNICODE === '1' || config.unicodeMode === false
+    });
+    process.stdout.write(title + '\n');
+  } catch (_) {
+    try { process.stdout.write('agy\n'); } catch (_) {}
+  }
 }
 
 // ─── HUD RENDER CORE ───────────────────────────────────────────────────────────
 
 function runHud(raw) {
-  let j = {};
-  try { j = JSON.parse(raw); } catch (_) { /* bad JSON, proceed with defaults */ }
+  try {
+    let j = {};
+    try { j = JSON.parse(raw); } catch (_) { /* bad JSON, proceed with defaults */ }
 
-  const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || process.cwd();
-  const ctxOut = dig(j, 'context_window', 'total_output_tokens') || 0;
-  const convId = j.conversation_id || j.session_id || null;
+    const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || process.cwd();
+    const ctxOut = dig(j, 'context_window', 'total_output_tokens') || 0;
+    const convId = j.conversation_id || j.session_id || null;
 
-  const cachePath = path.join(SETTINGS_DIR, 'speed-cache.json');
-  const streamSpeed = getSpeed(ctxOut, cachePath, convId);
+    const cachePath = path.join(SETTINGS_DIR, 'speed-cache.json');
+    const streamSpeed = getSpeed(ctxOut, cachePath, convId);
 
-  const vcsInfo = getVcsInfo(project, j);
-  const tPath = resolveTranscript(j);
-  const transcriptData = parseTranscript(tPath, j.task_count || 0);
-  const settings = readSettingsSafe();
-  const permMode = extractPermissionMode(settings);
-  const orchestrator = (settings && typeof settings.orchestrator === 'object') ? settings.orchestrator : null;
+    const vcsInfo = getVcsInfo(project, j);
+    const tPath = resolveTranscript(j);
+    const transcriptData = parseTranscript(tPath, j.task_count || 0);
+    const settings = readSettingsSafe();
+    const permMode = extractPermissionMode(settings);
+    const orchestrator = (settings && typeof settings.orchestrator === 'object') ? settings.orchestrator : null;
 
-  const lines = renderHUD(j, config, transcriptData, {
-    vcsType: vcsInfo.vcsType,
-    gitBranch: vcsInfo.branch,
-    gitDirty: Boolean(vcsInfo.dirty),
-    gitAhead: vcsInfo.ahead,
-    gitBehind: vcsInfo.behind,
-    gitRepoUrl: vcsInfo.gitRepoUrl,
-    speed: streamSpeed,
-    permissionMode: permMode,
-    orchestrator,
-    transcriptPath: tPath
-  });
+    const lines = renderHUD(j, config, transcriptData, {
+      vcsType: vcsInfo.vcsType,
+      gitBranch: vcsInfo.branch,
+      gitDirty: Boolean(vcsInfo.dirty),
+      gitAhead: vcsInfo.ahead,
+      gitBehind: vcsInfo.behind,
+      gitRepoUrl: vcsInfo.gitRepoUrl,
+      speed: streamSpeed,
+      permissionMode: permMode,
+      orchestrator,
+      transcriptPath: tPath
+    });
 
-  process.stdout.write(lines.join('\n') + '\n');
+    process.stdout.write(lines.join('\n') + '\n');
+  } catch (_) {
+    try { process.stdout.write('antigravity-hud\n'); } catch (_) {}
+  }
 }

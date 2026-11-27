@@ -67,19 +67,39 @@ function categoriseTool(toolName) {
   return 'tool';
 }
 
-/** Recursively find all files matching a name under a directory. */
-function findFiles(dir, target) {
+/**
+ * Atomically write JSON to disk using a PID+random temp file + rename to prevent
+ * Windows EBUSY / partial-file corruption when statusLine and title run concurrently.
+ */
+function atomicWriteJson(filePath, data) {
+  let tmpPath = '';
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    tmpPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmpPath, filePath);
+  } catch (_) {
+    try {
+      if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch (_) {}
+  }
+}
+
+/**
+ * Fast, bounded lookup of transcript.jsonl directly under <brainDir>/<convId>/.system_generated/logs/
+ * (avoids unbounded recursive traversal into scratch/ or cloned repos inside brain folders).
+ */
+function findTranscriptsInBrainDir(brainDir) {
   const results = [];
   try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const entries = fs.readdirSync(brainDir, { withFileTypes: true });
     for (const e of entries) {
-      const full = path.join(dir, e.name);
+      if (!e.isDirectory()) continue;
+      const candidate = path.join(brainDir, e.name, '.system_generated', 'logs', 'transcript.jsonl');
       try {
-        if (e.isDirectory()) {
-          results.push(...findFiles(full, target));
-        } else if (e.name === target) {
-          const stat = fs.statSync(full);
-          results.push({ path: full, mtime: stat.mtimeMs });
+        const stat = fs.statSync(candidate);
+        if (stat.isFile()) {
+          results.push({ path: candidate, mtime: stat.mtimeMs });
         }
       } catch (_) {}
     }
@@ -97,11 +117,15 @@ function saveTranscriptCache(statePath, tPath, convId = null) {
         existing = {};
       }
     }
-    existing.conversationId = convId || null;
+    const nextConvId = convId || null;
+    // Skip redundant disk writes when the cached transcript hasn't changed
+    if (existing.conversationId === nextConvId && existing.transcriptPath === tPath) {
+      return;
+    }
+    existing.conversationId = nextConvId;
     existing.transcriptPath = tPath;
     existing.transcriptMtime = Date.now();
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify(existing, null, 2), 'utf8');
+    atomicWriteJson(statePath, existing);
   } catch (_) {}
 }
 
@@ -160,7 +184,7 @@ function resolveTranscript(j, options = {}) {
     }
   } catch (_) {}
 
-  // 3. Fallback: Search common brain directories for newest transcript.jsonl
+  // 3. Fallback: Search common brain directories (direct layout only, no deep recursion)
   const searchDirs = [
     path.join(home, '.gemini', 'antigravity-cli', 'brain'),
     path.join(home, '.gemini', 'antigravity', 'brain'),
@@ -168,7 +192,7 @@ function resolveTranscript(j, options = {}) {
   let all = [];
   for (const d of searchDirs) {
     try {
-      if (fs.existsSync(d)) all.push(...findFiles(d, 'transcript.jsonl'));
+      if (fs.existsSync(d)) all.push(...findTranscriptsInBrainDir(d));
     } catch (_) {}
   }
   if (all.length === 0) return null;
@@ -431,15 +455,12 @@ function getSpeed(currentTokens, cachePath, convId = null) {
   const now = Date.now();
 
   if (convId && cache.conversationId && cache.conversationId !== convId) {
-    try {
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, JSON.stringify({
-        conversationId: convId,
-        lastTokens: currentTokens,
-        lastTimestamp: now,
-        lastSpeed: 0
-      }), 'utf8');
-    } catch (_) {}
+    atomicWriteJson(cachePath, {
+      conversationId: convId,
+      lastTokens: currentTokens,
+      lastTimestamp: now,
+      lastSpeed: 0
+    });
     return 0;
   }
 
@@ -455,15 +476,12 @@ function getSpeed(currentTokens, cachePath, convId = null) {
     } else if (dt > 3) {
       speed = 0;
     }
-    try {
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-      fs.writeFileSync(cachePath, JSON.stringify({
-        conversationId: convId || cache.conversationId || null,
-        lastTokens: currentTokens,
-        lastTimestamp: now,
-        lastSpeed: speed
-      }), 'utf8');
-    } catch (_) {}
+    atomicWriteJson(cachePath, {
+      conversationId: convId || cache.conversationId || null,
+      lastTokens: currentTokens,
+      lastTimestamp: now,
+      lastSpeed: speed
+    });
   }
   return speed;
 }
