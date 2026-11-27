@@ -1,6 +1,6 @@
 {
   "name": "antigravity-hud",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "A beautiful, cross-platform statusline HUD & window title provider for the Antigravity CLI: native cost, Vim mode, live steps, subagents, quotas, cache hits, OSC 8 links, and vibes.",
   "main": "bin/antigravity-hud.js",
   "publishConfig": {

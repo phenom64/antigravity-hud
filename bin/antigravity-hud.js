@@ -82,18 +82,24 @@ function findOnPath() {
   }
 }
 
+function resolveShortPathWin(binPath) {
+  if (os.platform() !== 'win32' || !/\s/.test(binPath)) return binPath;
+  try {
+    // Use windowsVerbatimArguments so Node doesn't escape the quotes around binPath for cmd.exe
+    const shortPath = execFileSync(
+      'cmd.exe',
+      ['/d', '/s', '/c', `for %I in ("${binPath}") do @echo %~sI`],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsVerbatimArguments: true }
+    ).trim();
+    if (shortPath && !/\s/.test(shortPath) && fs.existsSync(shortPath)) {
+      return shortPath;
+    }
+  } catch (_) {}
+  return binPath;
+}
+
 function formatStandaloneCommand(binPath) {
-  let resolved = binPath;
-  if (os.platform() === 'win32' && /\s/.test(resolved)) {
-    try {
-      const shortPath = execFileSync(
-        'cmd.exe',
-        ['/c', `for %I in ("${resolved}") do @echo %~sI`],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
-      ).trim();
-      if (shortPath && !/\s/.test(shortPath)) resolved = shortPath;
-    } catch (_) {}
-  }
+  const resolved = resolveShortPathWin(binPath);
   return /\s/.test(resolved) ? `node "${resolved}"` : `node ${resolved}`;
 }
 
@@ -106,12 +112,11 @@ function isHudCommand(command, suffix = '') {
     trimmed = trimmed.slice(0, -suffix.length).trim();
   }
   if (trimmed === 'antigravity-hud') return true;
-  const normalized = trimmed.replace(/\\/g, '/');
-  const standaloneNorm = STANDALONE_BIN.replace(/\\/g, '/');
+  const normalized = trimmed.replace(/\\/g, '/').toLowerCase();
+  const standaloneNorm = STANDALONE_BIN.replace(/\\/g, '/').toLowerCase();
   return (
     normalized.includes(standaloneNorm) ||
-    normalized.endsWith('/antigravity-hud/bin/antigravity-hud.js') ||
-    normalized.endsWith('/antigravity-hud/bin/antigravity-hud.js"')
+    /\/antigr(?:avity-hud|~\d+)\/bin\/antigr(?:avity-hud|~\d+)\.js"?$/.test(normalized)
   );
 }
 
@@ -396,7 +401,12 @@ function runInstall(flags = []) {
   } else if (os.platform() === 'win32') {
     const globalJs = path.join(path.dirname(globalBin), 'node_modules', 'antigravity-hud', 'bin', 'antigravity-hud.js');
     if (fs.existsSync(globalJs)) {
-      targetCommand = formatStandaloneCommand(globalJs);
+      const shortJs = resolveShortPathWin(globalJs);
+      // Only bypass the .cmd shim when we have a space-free path; Antigravity CLI splits
+      // statusLine.command on whitespace without shell quote parsing.
+      if (!/\s/.test(shortJs)) {
+        targetCommand = `node ${shortJs}`;
+      }
     }
   }
   const targetTitleCommand = `${targetCommand} title`;

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-27
+
+### Fixed
+- **Windows Path-with-Spaces Fix (`Cannot find module ... "C:\Users\...`)**:
+  - Fixed `resolveShortPathWin()` in `bin/antigravity-hud.js` by passing `windowsVerbatimArguments: true` to `cmd.exe` so Windows 8.3 short paths (`C:\Users\KAVISH~1\...`) resolve properly instead of silently failing and falling back to quoted paths with spaces (which Antigravity CLI splits on whitespace without shell-quote parsing).
+  - If 8.3 short names are disabled on a Windows volume and the path still contains spaces, `antigravity-hud install` now safely falls back to `'antigravity-hud'` instead of emitting a broken quoted `node "..."` command.
+  - Updated `isHudCommand()` (`doctor` / `uninstall`) to recognize Windows 8.3 short paths (`ANTIGR~1/bin/ANTIGR~1.JS`).
+
 ## [0.6.1] - 2026-11-27
 
 ### Fixed
