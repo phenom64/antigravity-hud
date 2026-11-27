@@ -18,8 +18,13 @@ Antigravity's built-in statusline is minimal, though. I wanted a HUD that shows 
 
 So I built this. First as a [PowerShell script](legacy/statusline-syn.ps1), then as a zero-dependency Node.js CLI.
 
-## What's new in 0.6.0
+## What's new in 0.6.3
 
+- **`claude-hud` Parity Upgrades**:
+  - **Live in-flight tool + target (`showActiveTool`)**: Line 3 shows the currently running tool and its target filename/command (`⠋ edit lines.js`) next to completed tallies.
+  - **Natural-language `/hud` skill (`--with-skill`) + `antigravity-hud config`**: Install the bundled skill with `antigravity-hud install --with-skill` to tweak settings in plain English inside Antigravity CLI, backed by `antigravity-hud config set <key> <value>`.
+  - **Context display modes (`contextValue`) & `pathLevels` (`1–3`)**: Switch between `both`, `percent`, `remaining` (`91% left`), or `tokens` (`88.2k/1.0m`), and show 1–3 trailing path segments for monorepos/worktrees.
+  - **Workspace context counts (`showConfigCounts`) & optional dividers (`layoutStyle: "separators"`)**: Displays loaded `GEMINI.md`/rules/hooks/MCP counts on Line 4 and supports a horizontal divider between telemetry and activity lines.
 - **Full Antigravity CLI v1.5.17 statusline payload parity**:
   - **Native USD cost (`cost.total_usd` / `cost.subagent_usd`)**: Uses exact CLI-reported spend (including subagent breakdown `+$0.04 sub`) when supplied, falling back to `~` API estimates only when omitted.
   - **Vim editor mode badge (`vim.mode`)**: Shows color-coded `NORMAL`, `INSERT`, `VISUAL`, or `V-LINE` on Line 1 when Vim mode is active.
@@ -82,9 +87,9 @@ npm install -g antigravity-hud && antigravity-hud install
 npm install -g antigravity-hud; antigravity-hud install
 ```
 
-**Also enable dynamic terminal window titles (`title`):**
+**Also enable dynamic terminal window titles (`title`) and the in-TUI `/hud` skill:**
 ```bash
-npx antigravity-hud install --with-title
+npx antigravity-hud install --with-title --with-skill
 ```
 
 **Or configure directly inside the Antigravity TUI:**
@@ -93,7 +98,7 @@ npx antigravity-hud install --with-title
 ```
 Use `/statusline off` to pause, `/statusline enable` to resume, `/statusline delete` to revert, and `/title` to toggle window titles.
 
-`antigravity-hud install` creates `~/.gemini/antigravity-cli/settings.json` if needed, backs up your existing settings (keeping the 5 newest backups), preserves `padding` and `stack_with_default`, and supports `--with-title`, `--stack`, `--no-stack`, and `--padding <n>`.
+`antigravity-hud install` creates `~/.gemini/antigravity-cli/settings.json` if needed, backs up your existing settings (keeping the 5 newest backups), preserves `padding` and `stack_with_default`, and supports `--with-title`, `--with-skill`, `--stack`, `--no-stack`, and `--padding <n>`.
 
 ### Verify installation
 
@@ -105,10 +110,13 @@ Checks your `PATH`, prints the active `agentMode`, `toolPermission`, `statusLine
 
 ### Configuration
 
-Run the interactive configuration wizard:
+Run the interactive configuration wizard, or update keys non-interactively:
 
 ```bash
 antigravity-hud configure
+antigravity-hud config set contextValue remaining
+antigravity-hud config set pathLevels 2
+antigravity-hud config set layoutStyle separators
 ```
 
 Preferences are saved to `~/.gemini/antigravity-cli/antigravity-hud-config.json`:
@@ -116,10 +124,15 @@ Preferences are saved to `~/.gemini/antigravity-cli/antigravity-hud-config.json`
 ```json
 {
   "preset": "full",
+  "layoutStyle": "default",
+  "contextValue": "both",
+  "pathLevels": 1,
   "showCost": true,
   "showSpeed": true,
   "showCacheHit": true,
   "showQuotaPace": false,
+  "showActiveTool": true,
+  "showConfigCounts": true,
   "showArtifacts": true,
   "showConversationId": false,
   "enableLinks": true,

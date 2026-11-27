@@ -71,6 +71,19 @@ function basenameAny(p) {
   return last || String(p);
 }
 
+/**
+ * Format a project path keeping up to `levels` trailing segments (1..3),
+ * matching claude-hud's `pathLevels` option.
+ */
+function formatProjectPath(p, levels = 1) {
+  if (!p) return '';
+  const n = Math.max(1, Math.min(3, parseInt(levels, 10) || 1));
+  const parts = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+  if (parts.length === 0) return String(p);
+  if (n === 1 || parts.length <= 1) return parts[parts.length - 1];
+  return parts.slice(-n).join('/');
+}
+
 /** Safely get a nested property. */
 function dig(obj, ...keys) {
   let cur = obj;
@@ -152,7 +165,7 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     : (process.env.AGY_HUD_LINKS === '1' || (process.env.AGY_HUD_LINKS !== '0' && cfg.enableLinks !== false));
 
   let SEP = '\u2502', DOT = '\u25CF', UP = '\u2191', DOWN = '\u2193';
-  let FAST = '\u23E9', PLAY_DOUBLE = '\u23F5\u23F5', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
+  let FAST = '\u23F5\u23F5', PLAY_DOUBLE = '\u23F5\u23F5', WARN = '\u26A0', CHECK = '\u2714', TIMES = '\u00D7';
   let CROSS = '\u2716', FULL = '\u2588', EMPTY = '\u2591';
   let PAUSE = '\u23F8', STOP = '\u25A0', BOLT = '\u26A1', ARROW = '\u2192';
   let PACE_UP = '\u21E1', PACE_DOWN = '\u21E3', HOURGLASS = '\u23F3';
@@ -218,7 +231,7 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     ? String(j.model.effort)
     : '';
   const project = dig(j, 'workspace', 'project_dir') || dig(j, 'workspace', 'current_dir') || j.cwd || process.cwd();
-  const repo = basenameAny(project);
+  const repo = formatProjectPath(project, cfg.pathLevels || 1);
   const cols = j.terminal_width || 120;
   const state = j.agent_state || 'idle';
   const convId = j.conversation_id || j.session_id || '';
@@ -508,11 +521,29 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     compactStr = ` ${Amber}${WARN}>200k${R}`;
   }
 
+  const ctxValueMode = String(cfg.contextValue || 'both').toLowerCase();
+  const roundedPct = Math.round(ctxPct);
+  const remPct = Math.max(0, 100 - roundedPct);
+
   let ctxLabel;
   if (layout === 'tiny') {
-    ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${Math.round(ctxPct)}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
+    if (ctxValueMode === 'remaining') {
+      ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${remPct}% left${R}`;
+    } else if (ctxValueMode === 'tokens') {
+      ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${fmtNum(usedApproxTokens)}/${fmtNum(ctxSize)}${R}`;
+    } else if (ctxValueMode === 'percent') {
+      ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${roundedPct}%${R}`;
+    } else {
+      ctxLabel = `${colorLabel}ctx${R} ${ctxCol}${roundedPct}%${R} ${colorLabel}(${fmtNum(ctxIn)}${UP}/${fmtNum(ctxOut)}${DOWN})${R}`;
+    }
+  } else if (ctxValueMode === 'percent') {
+    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${roundedPct}%${R}${cacheStr}${compactStr}`;
+  } else if (ctxValueMode === 'remaining') {
+    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${ctxCol}${B}${remPct}% left${R}${cacheStr}${compactStr}`;
+  } else if (ctxValueMode === 'tokens') {
+    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${fmtNum(usedApproxTokens)}/${fmtNum(ctxSize)}${R}${cacheStr}${compactStr}`;
   } else {
-    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${Math.round(ctxPct)}%${R}`
+    ctxLabel = `${colorLabel}ctx${R}${ctxBarStr} ${White}${B}${roundedPct}%${R}`
       + ` ${colorLabel}(${fmtNum(ctxIn)} ${UP} / ${fmtNum(ctxOut)} ${DOWN} / ${fmtNum(ctxSize)})${R}`
       + `${cacheStr}${compactStr}`;
   }
@@ -545,14 +576,31 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
   const topTools = toolEntries.slice(0, toolMax);
   topTools.sort((a, b) => a.last - b.last);
 
+  // Live in-flight tool + target badge (claude-hud style)
+  let activeToolPart = '';
+  if (cfg.showActiveTool !== false && layout !== 'tiny') {
+    const liveTool = tData.activeTool || (isActive && stateLower.includes('tool') ? tData.lastTool : null);
+    if (liveTool && liveTool.cat) {
+      const toolGlyph = !noSpinner
+        ? SPINNER_FRAMES[Math.floor(Date.now() / 120) % SPINNER_FRAMES.length]
+        : DOT;
+      const targetStr = liveTool.target ? ` ${colorLabel}${truncateText(liveTool.target, layout === 'normal' ? 24 : 14)}${R}` : '';
+      activeToolPart = `${colorActive}${toolGlyph}${R} ${White}${B}${liveTool.cat}${R}${targetStr}`;
+    }
+  }
+
   let line3;
-  if (topTools.length > 0) {
-    const parts = topTools.map(t => {
+  if (topTools.length > 0 || activeToolPart) {
+    const parts = [];
+    if (activeToolPart) parts.push(activeToolPart);
+    const maxCompleted = activeToolPart ? Math.max(1, toolMax - 1) : toolMax;
+    for (const t of topTools.slice(0, maxCompleted)) {
       if (layout === 'tiny') {
-        return `${colorSuccess}${CHECK}${R}${White}${t.cat}${R}${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`;
+        parts.push(`${colorSuccess}${CHECK}${R}${White}${t.cat}${R}${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`);
+      } else {
+        parts.push(`${colorSuccess}${CHECK}${R} ${White}${t.cat}${R} ${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`);
       }
-      return `${colorSuccess}${CHECK}${R} ${White}${t.cat}${R} ${colorLabel}${TIMES}${Math.min(t.count, 99)}${R}`;
-    });
+    }
     line3 = parts.join(SEP_PAD) + ` ${colorSep}${SEP}${R}`;
   } else {
     line3 = `${colorLabel}--${R} ${colorSep}${SEP}${R}`;
@@ -706,12 +754,30 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
     }
   }
 
+  const wsCounts = options.workspaceCounts || null;
+  const totalMcpCount = Math.max(
+    Array.isArray(tData.mcpServers) ? tData.mcpServers.length : 0,
+    (wsCounts && Number(wsCounts.configuredMcp)) || 0
+  );
+
   if (cfg.showSkills !== false && Array.isArray(tData.skills) && tData.skills.length > 0 && layout !== 'tiny') {
     line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.skills.length} skills${R}`;
   }
 
-  if (cfg.showMcp !== false && Array.isArray(tData.mcpServers) && tData.mcpServers.length > 0 && layout !== 'tiny') {
-    line4 += ` ${colorSuccess}${DOT}${R} ${White}${tData.mcpServers.length} mcp${R}`;
+  if (cfg.showMcp !== false && totalMcpCount > 0 && layout !== 'tiny') {
+    line4 += ` ${colorSuccess}${DOT}${R} ${White}${totalMcpCount} mcp${R}`;
+  }
+
+  if (cfg.showConfigCounts !== false && wsCounts && layout === 'normal') {
+    if (wsCounts.docs > 0) {
+      line4 += ` ${colorSuccess}${DOT}${R} ${colorLabel}${wsCounts.docs} md${R}`;
+    }
+    if (wsCounts.rules > 0) {
+      line4 += ` ${colorSuccess}${DOT}${R} ${colorLabel}${wsCounts.rules} rules${R}`;
+    }
+    if (wsCounts.hooks > 0) {
+      line4 += ` ${colorSuccess}${DOT}${R} ${colorLabel}${wsCounts.hooks} hooks${R}`;
+    }
   }
 
   if (dig(j, 'sandbox', 'enabled') === true) {
@@ -730,6 +796,12 @@ function renderHUD(payload = {}, config = {}, transcriptData = {}, options = {})
 
   if (cfg.preset === 'minimal') return [line1];
   if (cfg.preset === 'essential') return [line1, line2];
+  if (cfg.layoutStyle === 'separators') {
+    const divChar = noUnicode ? '-' : '\u2500';
+    const divLen = Math.max(20, Math.min(cols - 2, 72));
+    const divider = `${colorLabel}${divChar.repeat(divLen)}${R}`;
+    return [line1, line2, divider, line3, line4];
+  }
   return [line1, line2, line3, line4];
 }
 
@@ -738,6 +810,7 @@ module.exports = {
   bar,
   fmtNum,
   basenameAny,
+  formatProjectPath,
   resolveColor,
   ANSI_BY_NAME,
   resolvePermissionMode

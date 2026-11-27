@@ -19,6 +19,7 @@ const { getVcsInfo } = require('../src/git');
 const { resolveTranscript, parseTranscript, getSpeed } = require('../src/transcript');
 const { renderHUD } = require('../src/render/lines');
 const { renderTitle } = require('../src/title');
+const { getWorkspaceContextCounts } = require('../src/workspace');
 
 // ─── EPIPE / BROKEN-PIPE SAFETY ────────────────────────────────────────────────
 // Antigravity CLI may cancel an in-flight statusline/title tick when a newer state
@@ -125,7 +126,7 @@ function installStandaloneRuntime() {
   if (path.resolve(STANDALONE_DIR) === pkgRoot) return;
 
   fs.mkdirSync(STANDALONE_DIR, { recursive: true });
-  for (const rel of ['bin', 'src', 'package.json']) {
+  for (const rel of ['bin', 'src', 'skills', 'package.json']) {
     const srcPath = path.join(pkgRoot, rel);
     const dstPath = path.join(STANDALONE_DIR, rel);
     if (fs.existsSync(srcPath)) {
@@ -228,6 +229,8 @@ if (arg === 'install') {
   runUninstall();
 } else if (arg === 'configure' || arg === 'setup') {
   runConfigure();
+} else if (arg === 'config') {
+  runConfigCommand(process.argv.slice(3));
 } else if (arg === 'title') {
   runTitleCommand(readStdinSafe());
 } else if (arg === '--help' || arg === '-h') {
@@ -287,10 +290,10 @@ function runMode(sub) {
 
   const getHUDLabel = (modeVal) => {
     if (modeVal === 'request-review') return '⏸ review mode on';
-    if (modeVal === 'proceed-in-sandbox') return '⏩ auto mode on';
+    if (modeVal === 'proceed-in-sandbox') return '⏵⏵ auto mode on';
     if (modeVal === 'accept-edits') return '⏵⏵ accept edits on';
     if (modeVal === 'plan') return '⏸ plan mode on';
-    if (modeVal === 'always-proceed') return '⏩ bypass permissions (YOLO)';
+    if (modeVal === 'always-proceed') return '⏵⏵ bypass permissions (YOLO)';
     if (modeVal === 'strict') return '■ strict mode on';
     return modeVal;
   };
@@ -360,8 +363,119 @@ function runMode(sub) {
   }
 }
 
+function installBundledSkill() {
+  const srcSkill = path.resolve(__dirname, '..', 'skills', 'antigravity-hud', 'SKILL.md');
+  if (!fs.existsSync(srcSkill)) return null;
+  const dstDir = path.join(SETTINGS_DIR, 'skills', 'antigravity-hud');
+  const dstSkill = path.join(dstDir, 'SKILL.md');
+  fs.mkdirSync(dstDir, { recursive: true });
+  fs.copyFileSync(srcSkill, dstSkill);
+  return dstSkill;
+}
+
+function runConfigCommand(args = []) {
+  const action = (args[0] || 'get').toLowerCase();
+  const confPath = process.env.AGY_HUD_CONFIG || path.join(SETTINGS_DIR, 'antigravity-hud-config.json');
+
+  const writeConfigAtomic = (obj) => {
+    fs.mkdirSync(path.dirname(confPath), { recursive: true });
+    const tmp = `${confPath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    fs.renameSync(tmp, confPath);
+  };
+
+  if (action === 'get') {
+    const current = loadConfig(confPath);
+    if (args[1]) {
+      const key = args[1];
+      if (!(key in current)) {
+        console.error(`  ${Red}[!] Unknown config key: ${key}${R}`);
+        process.exit(1);
+      }
+      console.log(typeof current[key] === 'object' ? JSON.stringify(current[key], null, 2) : String(current[key]));
+    } else {
+      console.log(JSON.stringify(current, null, 2));
+    }
+    process.exit(0);
+  }
+
+  if (action === 'reset') {
+    try {
+      writeConfigAtomic(DEFAULT_CONFIG);
+      console.log(`  ${Green}[OK] Reset antigravity-hud config to defaults: ${confPath}${R}`);
+      process.exit(0);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to reset config: ${err.message}${R}`);
+      process.exit(1);
+    }
+  }
+
+  if (action === 'set') {
+    const key = args[1];
+    const rawVal = args[2];
+    if (!key || rawVal === undefined) {
+      console.error(`  ${Red}[!] Usage: antigravity-hud config set <key> <value>${R}`);
+      process.exit(1);
+    }
+    if (!(key in DEFAULT_CONFIG) || key === 'colors') {
+      console.error(`  ${Red}[!] Unknown or non-scalar config key: ${key}${R}`);
+      console.log(`  Valid keys: ${Object.keys(DEFAULT_CONFIG).filter(k => k !== 'colors').join(', ')}`);
+      process.exit(1);
+    }
+
+    const ENUMS = {
+      preset: ['full', 'essential', 'minimal'],
+      layoutStyle: ['default', 'separators'],
+      contextValue: ['both', 'percent', 'remaining', 'tokens']
+    };
+
+    let parsedVal;
+    const defVal = DEFAULT_CONFIG[key];
+    if (typeof defVal === 'boolean') {
+      const lower = String(rawVal).toLowerCase();
+      if (lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on') parsedVal = true;
+      else if (lower === 'false' || lower === '0' || lower === 'no' || lower === 'off') parsedVal = false;
+      else {
+        console.error(`  ${Red}[!] Expected boolean (true/false) for ${key}, got '${rawVal}'${R}`);
+        process.exit(1);
+      }
+    } else if (typeof defVal === 'number') {
+      const n = parseInt(rawVal, 10);
+      if (!Number.isInteger(n) || (key === 'pathLevels' && (n < 1 || n > 3))) {
+        console.error(`  ${Red}[!] Invalid value for ${key}: '${rawVal}' (expected 1-3)${R}`);
+        process.exit(1);
+      }
+      parsedVal = n;
+    } else if (ENUMS[key]) {
+      const lower = String(rawVal).toLowerCase();
+      if (!ENUMS[key].includes(lower)) {
+        console.error(`  ${Red}[!] Invalid value for ${key}: '${rawVal}' (valid: ${ENUMS[key].join(', ')})${R}`);
+        process.exit(1);
+      }
+      parsedVal = lower;
+    } else {
+      parsedVal = String(rawVal);
+    }
+
+    const current = loadConfig(confPath);
+    current[key] = parsedVal;
+    try {
+      writeConfigAtomic(current);
+      console.log(`  ${Green}[OK] Set ${key} = ${parsedVal}${R}`);
+      process.exit(0);
+    } catch (err) {
+      console.error(`  ${Red}[!] Failed to write config: ${err.message}${R}`);
+      process.exit(1);
+    }
+  }
+
+  console.error(`  ${Red}[!] Unknown config action: ${action} (use get, set, or reset)${R}`);
+  process.exit(1);
+}
+
 function runInstall(flags = []) {
   const withTitle = flags.includes('--with-title');
+  const withSkill = flags.includes('--with-skill');
   const setStackTrue = flags.includes('--stack');
   const setStackFalse = flags.includes('--no-stack');
   let paddingOpt = null;
@@ -464,6 +578,16 @@ function runInstall(flags = []) {
   );
 
   if (statusLineSame && titleAlreadyConfigured) {
+    if (withSkill) {
+      try {
+        const installedSkill = installBundledSkill();
+        if (installedSkill) {
+          console.log(`  ${Green}[OK] Installed /hud configuration skill to: ${installedSkill}${R}`);
+        }
+      } catch (err) {
+        console.warn(`  ${Yellow}[!] Failed to install /hud skill: ${err.message}${R}`);
+      }
+    }
     if (usedStandalone) {
       console.log(`  ${Green}[OK] Runtime updated. statusLine is already configured.${R}\n`);
     } else {
@@ -496,6 +620,17 @@ function runInstall(flags = []) {
   } catch (err) {
     console.error(`  ${Red}[!] Failed to write settings.json:${R}`, err.message);
     process.exit(1);
+  }
+
+  if (withSkill) {
+    try {
+      const installedSkill = installBundledSkill();
+      if (installedSkill) {
+        console.log(`  ${Green}[OK] Installed /hud configuration skill to: ${installedSkill}${R}`);
+      }
+    } catch (err) {
+      console.warn(`  ${Yellow}[!] Failed to install /hud skill: ${err.message}${R}`);
+    }
   }
 
   console.log(`\n  ${White}Previous statusLine:${R}`);
@@ -784,8 +919,9 @@ function runHelp() {
     ${White}antigravity-hud${R}                Read statusline JSON from stdin and render the HUD (default)
     ${White}antigravity-hud title${R}          Read statusline JSON from stdin and print a plain-text window title
     ${White}antigravity-hud install${R}        Configure Antigravity CLI settings to use this HUD
-                                   Flags: --with-title, --stack, --no-stack, --padding <n>
+                                   Flags: --with-title, --with-skill, --stack, --no-stack, --padding <n>
     ${White}antigravity-hud configure${R}      Open the interactive configuration wizard
+    ${White}antigravity-hud config${R}         Inspect or update config non-interactively (get | set <k> <v> | reset)
     ${White}antigravity-hud doctor${R}         Check install status and run sample HUD & title render tests
     ${White}antigravity-hud uninstall${R}      Disable HUD (and title) configuration in settings.json
     ${White}antigravity-hud mode${R}           Show current Antigravity agentMode & toolPermission
@@ -839,6 +975,7 @@ function runHud(raw) {
     const settings = readSettingsSafe();
     const permMode = extractPermissionMode(settings);
     const orchestrator = (settings && typeof settings.orchestrator === 'object') ? settings.orchestrator : null;
+    const workspaceCounts = getWorkspaceContextCounts(project, settings);
 
     const lines = renderHUD(j, config, transcriptData, {
       vcsType: vcsInfo.vcsType,
@@ -850,6 +987,7 @@ function runHud(raw) {
       speed: streamSpeed,
       permissionMode: permMode,
       orchestrator,
+      workspaceCounts,
       transcriptPath: tPath
     });
 

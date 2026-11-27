@@ -7,10 +7,15 @@ const CONFIG_PATH = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antig
 
 const DEFAULT_CONFIG = {
   preset: 'full',
+  layoutStyle: 'default',
+  contextValue: 'both',
+  pathLevels: 1,
   showCost: true,
   showSpeed: true,
   showCacheHit: true,
   showQuotaPace: false,
+  showActiveTool: true,
+  showConfigCounts: true,
   showSkills: true,
   showMcp: true,
   showSubagents: true,

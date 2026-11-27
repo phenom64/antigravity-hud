@@ -208,6 +208,50 @@ function cleanArgString(val) {
   return val.replace(/^"|"$/g, '').trim();
 }
 
+/**
+ * Extract a concise human-readable target label (filename, query, command, role)
+ * from a tool call's arguments for live Line 3 telemetry (claude-hud style).
+ */
+function extractToolTarget(toolName, args) {
+  if (!args || typeof args !== 'object') return '';
+  const name = String(toolName || '').toLowerCase();
+
+  // File-based tools
+  const filePath = cleanArgString(
+    args.Path || args.AbsolutePath || args.TargetFile || args.path || args.file_path || ''
+  );
+  if (filePath) {
+    const base = filePath.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+    if (base) return base;
+  }
+
+  // Shell / command tools
+  if (name === 'run_command' || name.includes('bash') || name.includes('shell') || name.includes('command')) {
+    const summary = cleanArgString(args.toolSummary || '');
+    if (summary) return summary;
+    const cmd = cleanArgString(args.CommandLine || args.command || '');
+    if (cmd) return cmd.split(/\r?\n/)[0].trim();
+  }
+
+  // Search / grep / web tools
+  const query = cleanArgString(args.Query || args.Pattern || args.query || args.pattern || '');
+  if (query) return query;
+
+  // Subagent tools
+  if (name === 'invoke_subagent' || name === 'swarm') {
+    const role = cleanArgString(args.Role || args.TypeName || args.name || '');
+    if (role) return role;
+  }
+
+  // MCP tools: show tool action name after server prefix
+  if (name.startsWith('mcp__')) {
+    const parts = toolName.split('__');
+    if (parts.length >= 3) return parts.slice(2).join('_');
+  }
+
+  return '';
+}
+
 function countChecklistItems(text) {
   if (!text || typeof text !== 'string') return null;
   const doneMatches = text.match(/^\s*[-*]\s*\[[xX]\]\s+/gm);
@@ -279,6 +323,8 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
     mcpServers: [],
     planProgress: { done: 0, total: 0 },
     stepsProgress: { done: 0, total: 0, inProgress: 0, skipped: 0, failed: 0, activeTitle: '' },
+    activeTool: null,
+    lastTool: null,
     sessionDurationSeconds: 0
   };
 
@@ -307,6 +353,8 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
     let firstTsMs = (isTailSlice && stats && stats.birthtimeMs) ? stats.birthtimeMs : null;
     let lastTsMs = null;
     let seqNum = 0;
+    let pendingTool = null;
+    let lastTool = null;
 
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -337,7 +385,7 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
         }
       }
 
-      if (Array.isArray(entry.tool_calls)) {
+      if (Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
         for (const tc of entry.tool_calls) {
           const toolName = tc.name || tc.tool_name || (tc.function && (tc.function.name || tc.function)) || '';
           const cat = categoriseTool(toolName);
@@ -354,6 +402,11 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
           }
 
           const args = tc.arguments || tc.args || {};
+          const target = extractToolTarget(toolName, args);
+          if (toolName) {
+            lastTool = { name: toolName, cat, target };
+            pendingTool = lastTool;
+          }
           const rawPath = cleanArgString(args.Path || args.AbsolutePath || '');
           if (rawPath) {
             const skillMatch = rawPath.match(/[\\/]+skills[\\/]+([^\\/]+)[\\/]+SKILL\.md$/i);
@@ -412,9 +465,14 @@ function parseTranscript(transcriptPath, initialTaskCount = 0) {
             }
           }
         }
+      } else {
+        // A subsequent tool result, user turn, or text-only planner response means the previous tool call completed
+        pendingTool = null;
       }
     }
 
+    result.activeTool = pendingTool;
+    result.lastTool = lastTool;
     const refNowMs = lastTsMs || Date.now();
     result.activeSubagents = Array.from(subagentsMap.values()).map(sub => {
       const startMs = sub.startTime instanceof Date ? sub.startTime.getTime() : Date.now();
@@ -489,6 +547,7 @@ function getSpeed(currentTokens, cachePath, convId = null) {
 module.exports = {
   readLastBytes,
   categoriseTool,
+  extractToolTarget,
   resolveTranscript,
   parseTranscript,
   parseUpdateStepsArgs,

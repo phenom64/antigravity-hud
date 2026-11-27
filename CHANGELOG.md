@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-11-27
+
+### Added (`claude-hud` Parity)
+- **Live In-Flight Tool + Target on Line 3 (`showActiveTool`)**: Displays the currently running tool and its target filename, command summary, or search query (`⠋ edit lines.js`) alongside completed tool tallies (`✔ read ×15 │ ✔ edit ×38`).
+- **In-TUI `/hud` Configuration Skill (`--with-skill`) & `antigravity-hud config`**:
+  - Added bundled [skills/antigravity-hud/SKILL.md](skills/antigravity-hud/SKILL.md) installed via `antigravity-hud install --with-skill` so you can customize the HUD in natural language inside Antigravity CLI (e.g. *"show remaining context"*, *"use 2 path levels"*, *"switch to essential preset"*).
+  - Added atomic, validated `antigravity-hud config get | set <key> <value> | reset` subcommand.
+- **Context Display Modes (`contextValue`) & Multi-Segment Project Paths (`pathLevels`)**:
+  - `contextValue`: choose between `"both"` (default), `"percent"` (`9%`), `"remaining"` (`91% left`), or `"tokens"` (`88.2k/1.0m`).
+  - `pathLevels` (`1`–`3`): show trailing directory segments (e.g. `SynWare/antigravity-hud`) for worktrees and monorepos.
+- **Workspace Context Counts (`showConfigCounts`)**: Shallow, O(1) counts of loaded `GEMINI.md`/`AGENTS.md` docs, rules, hooks, and configured MCP servers on Line 4.
+- **Optional Layout Separators (`layoutStyle: "separators"`)**: Inserts a subtle horizontal divider line between telemetry (Lines 1–2) and activity (Lines 3–4).
+
+### Changed
+- Replaced `⏩` (`\u23E9`) with monochrome `⏵⏵` (`\u23F5\u23F5`) for auto and bypass permission modes so macOS terminals render it as a crisp text glyph instead of a color emoji.
+
 ## [0.6.2] - 2026-11-27
 
 ### Fixed

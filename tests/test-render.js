@@ -55,7 +55,7 @@ assert.ok(lines[1].includes('wk'));
 assert.ok(!lines.some(l => l.includes('RAM '))); // RAM metric removed
 assert.ok(lines[2].includes('read'));
 assert.ok(lines[2].includes('edit'));
-assert.ok(lines[3].includes('\u23E9 auto mode on'));
+assert.ok(lines[3].includes('\u23F5\u23F5 auto mode on'));
 assert.ok(lines[3].includes('3 shell'));
 assert.ok(lines[3].includes('1 tasks'));
 assert.ok(lines[3].includes('1 agents'));
@@ -91,7 +91,7 @@ const autoLines = renderHUD(
   {},
   { permissionMode: 'always-proceed' }
 );
-assert.ok(autoLines[3].includes('\u23E9 auto mode on'));
+assert.ok(autoLines[3].includes('\u23F5\u23F5 auto mode on'));
 
 const yoloLines = renderHUD(
   {
@@ -111,7 +111,7 @@ assert.strictEqual(yoloLines.length, 4);
 assert.ok(yoloLines[0].includes('Gemini 4 Argon (High)'));
 assert.ok(yoloLines[1].includes('argon-wk'));
 assert.ok(!yoloLines[1].includes(' 5h ')); // 5h quota suppressed when >= 25%
-assert.ok(yoloLines[3].includes('\u23E9 bypass permissions (YOLO)'));
+assert.ok(yoloLines[3].includes('\u23F5\u23F5 bypass permissions (YOLO)'));
 
 const strictLines = renderHUD(
   { model: 'Gemini 4 Argon (High)' },
@@ -279,5 +279,60 @@ const titleAscii = renderTitle(
   { noUnicode: true }
 );
 assert.strictEqual(titleAscii, '* ready | app | Opus 5.5 (H)');
+
+// Test 8: claude-hud parity features (pathLevels, contextValue, activeTool, workspaceCounts, separators)
+const claudeHudLines = renderHUD(
+  {
+    model: { display_name: 'Gemini 4 Neon (High)' },
+    workspace: { project_dir: 'C:\\Users\\dev\\Developer\\SynWare\\antigravity-hud' },
+    agent_state: 'tool_use',
+    terminal_width: 140,
+    context_window: {
+      total_input_tokens: 150000,
+      total_output_tokens: 10000,
+      context_window_size: 1000000,
+      used_percentage: 16
+    }
+  },
+  {
+    preset: 'full',
+    pathLevels: 2,
+    contextValue: 'remaining',
+    layoutStyle: 'separators',
+    showActiveTool: true,
+    showConfigCounts: true,
+    colorMode: false,
+    enableLinks: false
+  },
+  {
+    toolCounts: { read: 4, edit: 2 },
+    toolLastSeen: { read: 1, edit: 2 },
+    activeTool: { name: 'edit_file', cat: 'edit', target: 'lines.js' },
+    shellCount: 1
+  },
+  {
+    noSpinner: true,
+    workspaceCounts: { docs: 2, rules: 3, hooks: 1, configuredMcp: 2 }
+  }
+);
+assert.strictEqual(claudeHudLines.length, 5); // line1, line2, divider, line3, line4
+assert.ok(claudeHudLines[0].includes('SynWare/antigravity-hud'));
+assert.ok(claudeHudLines[1].includes('84% left'));
+assert.ok(claudeHudLines[2].includes('\u2500\u2500\u2500'));
+assert.ok(claudeHudLines[3].includes('edit lines.js'));
+assert.ok(claudeHudLines[4].includes('2 mcp'));
+assert.ok(claudeHudLines[4].includes('2 md'));
+assert.ok(claudeHudLines[4].includes('3 rules'));
+assert.ok(claudeHudLines[4].includes('1 hooks'));
+
+const tokensOnlyLines = renderHUD(
+  {
+    model: 'Gemini 4 Neon',
+    terminal_width: 130,
+    context_window: { total_input_tokens: 250000, context_window_size: 1000000, used_percentage: 25 }
+  },
+  { preset: 'essential', contextValue: 'tokens', colorMode: false, enableLinks: false }
+);
+assert.ok(tokensOnlyLines[1].includes('250.0k/1.0m'));
 
 console.log('✔ Line & title renderer tests passed');

@@ -390,6 +390,40 @@ try {
   assert.strictEqual(gitInfo.branch, 'cached-branch');
   assert.strictEqual(gitInfo.dirty, '*');
   assert.strictEqual(gitInfo.ahead, 3);
+
+  // Test 7: Live activeTool extraction & workspace context counts (claude-hud parity)
+  const { extractToolTarget } = require('../src/transcript');
+  const { getWorkspaceContextCounts } = require('../src/workspace');
+  assert.strictEqual(extractToolTarget('edit_file', { Path: 'C:\\repo\\src\\render\\lines.js' }), 'lines.js');
+  assert.strictEqual(extractToolTarget('run_command', { toolSummary: 'Unit test execution', CommandLine: 'npm test' }), 'Unit test execution');
+  assert.strictEqual(extractToolTarget('grep_search', { Query: 'renderHUD' }), 'renderHUD');
+
+  const activeTranscript = path.join(tmpDir, 'active-tool.jsonl');
+  fs.writeFileSync(activeTranscript, [
+    JSON.stringify({ type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'edit_file', args: { Path: '/app/src/lines.js' } }] })
+  ].join('\n') + '\n', 'utf8');
+  const activeParsed = parseTranscript(activeTranscript);
+  assert.strictEqual(activeParsed.activeTool.cat, 'edit');
+  assert.strictEqual(activeParsed.activeTool.target, 'lines.js');
+
+  fs.appendFileSync(activeTranscript, JSON.stringify({ type: 'TOOL_RESULT', content: 'ok' }) + '\n', 'utf8');
+  const doneParsed = parseTranscript(activeTranscript);
+  assert.strictEqual(doneParsed.activeTool, null);
+  assert.strictEqual(doneParsed.lastTool.target, 'lines.js');
+
+  const wsProj = path.join(tmpDir, 'ws-proj');
+  fs.mkdirSync(path.join(wsProj, '.gemini', 'rules'), { recursive: true });
+  fs.writeFileSync(path.join(wsProj, 'GEMINI.md'), '# Project', 'utf8');
+  fs.writeFileSync(path.join(wsProj, '.gemini', 'rules', 'style.md'), '# Style', 'utf8');
+  const wsCounts = getWorkspaceContextCounts(
+    wsProj,
+    { hooks: { PreToolUse: [{ command: 'echo hi' }] }, mcpServers: { syncloudos: {} } },
+    { homedir: tmpDir }
+  );
+  assert.strictEqual(wsCounts.docs, 1);
+  assert.strictEqual(wsCounts.rules, 1);
+  assert.strictEqual(wsCounts.hooks, 1);
+  assert.strictEqual(wsCounts.configuredMcp, 1);
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
